@@ -551,10 +551,16 @@ class AllDataBox extends React.PureComponent {
     let entityMap = new Map();
 
     function addEntity({name, label, keyPrefix, durableId, isCustomSetting, recordTypesSupported, isEverCreatable, newUrl}, api) {
-      label = label.match("__MISSING") ? "" : label; //Error is added to the label if no label exists
+      if (typeof name !== "string" || !name) {
+        return;
+      }
+      label = typeof label === "string" && !label.includes("__MISSING") ? label : ""; //Error is added to the label if no label exists
       let entity = entityMap.get(name);
       // Each API call enhances the data, only the Name fields are present for each call.
       if (entity) {
+        if (!entity.label && label) {
+          entity.label = label;
+        }
         if (!entity.keyPrefix) {
           entity.keyPrefix = keyPrefix;
         }
@@ -611,10 +617,11 @@ class AllDataBox extends React.PureComponent {
       return sfConn.rest("/services/data/v" + apiVersion + "/tooling/query?q=" + encodeURIComponent("SELECT COUNT() FROM EntityDefinition"))
         .then(res => {
           let entityNb = res.totalSize;
+          let requests = [];
           for (let bucket = 0; bucket < Math.ceil(entityNb / 2000); bucket++) {
             let offset = bucket > 0 ? " OFFSET " + (bucket * 2000) : "";
             let query = "SELECT QualifiedApiName, Label, KeyPrefix, DurableId, IsCustomSetting, RecordTypesSupported, NewUrl, IsEverCreatable FROM EntityDefinition ORDER BY QualifiedApiName ASC LIMIT 2000" + offset;
-            sfConn.rest("/services/data/v" + apiVersion + "/tooling/query?q=" + encodeURIComponent(query))
+            requests.push(sfConn.rest("/services/data/v" + apiVersion + "/tooling/query?q=" + encodeURIComponent(query))
               .then(respEntity => {
                 for (let record of respEntity.records) {
                   addEntity({
@@ -630,8 +637,9 @@ class AllDataBox extends React.PureComponent {
                 }
               }).catch(err => {
                 console.error("list entity definitions: ", err);
-              });
+              }));
           }
+          return Promise.all(requests);
         }).catch(err => {
           console.error("count entity definitions: ", err);
         });
