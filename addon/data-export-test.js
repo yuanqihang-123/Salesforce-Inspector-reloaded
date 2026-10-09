@@ -66,19 +66,36 @@ export async function dataExportTest(test) {
   assertEquals("Account fields suggestions:", vm.autocompleteResults.title);
   assertEquals("Name", getValues(vm.autocompleteResults.results)[0]);
 
+  function assertQuerySurvivesTabSwitch(expectedQuery) {
+    assertEquals(expectedQuery, vm.getCurrentTabQuery());
+    let savedTabs = JSON.parse(localStorage.getItem(`${vm.sfHost}_queryTabs`));
+    assertEquals(expectedQuery, savedTabs[vm.activeTabIndex].query);
+    let originalTabIndex = vm.activeTabIndex;
+    vm.addQueryTab();
+    let otherTabIndex = vm.activeTabIndex;
+    vm.setActiveTab(otherTabIndex);
+    vm.setActiveTab(originalTabIndex);
+    assertEquals(expectedQuery, queryInput.value);
+    vm.removeQueryTab(otherTabIndex);
+  }
+
   // Select autocomplete value in SELECT
+  vm.updateCurrentTabQuery(queryInput.value);
   vm.autocompleteClick(vm.autocompleteResults.results[0]);
   assertEquals("select Id, Name from Account", queryInput.value);
   assertEquals("Account fields suggestions:", vm.autocompleteResults.title);
   assertEquals("Name", getValues(vm.autocompleteResults.results)[0]);
+  assertQuerySurvivesTabSwitch("select Id, Name from Account");
 
   // Select multiple values in SELECT using Ctrl+Space
   setQuery("select Id, shipp", "", " from Account");
   assertEquals("select Id, shipp from Account", queryInput.value);
   assertEquals("Account fields suggestions:", vm.autocompleteResults.title);
   assertEquals(["ShippingAddress", "ShippingCity", "ShippingCountry", "ShippingGeocodeAccuracy", "ShippingLatitude", "ShippingLongitude", "ShippingPostalCode", "ShippingState", "ShippingStreet"], getValues(vm.autocompleteResults.results));
+  vm.updateCurrentTabQuery(queryInput.value);
   vm.queryAutocompleteHandler({ctrlSpace: true});
   assertEquals("select Id, ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry, ShippingLatitude, ShippingLongitude, ShippingGeocodeAccuracy, ShippingAddress from Account", queryInput.value);
+  assertQuerySurvivesTabSwitch(queryInput.value);
 
   // Autocomplete relationship field in SELECT
   setQuery("select Id, OWNE", "", " from Account");

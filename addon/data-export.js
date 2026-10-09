@@ -421,6 +421,8 @@ class Model {
         if (value.startsWith("FIELDS") && !query.toLowerCase().includes("limit")) {
           vm.queryInput.value += " LIMIT 200";
         }
+        // Programmatic edits do not fire the input event that saves the tab query.
+        vm.updateCurrentTabQuery(vm.queryInput.value);
         vm.queryAutocompleteHandler();
       }
     };
@@ -857,6 +859,7 @@ class Model {
         if (ar.length > 0) {
           vm.queryInput.focus();
           vm.queryInput.setRangeText(ar.join(", ") + (isAfterFrom ? " " : ""), selStart - contextPath.length, selEnd, "end");
+          vm.updateCurrentTabQuery(vm.queryInput.value);
         }
         vm.queryAutocompleteHandler();
         return;
