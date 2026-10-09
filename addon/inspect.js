@@ -1457,6 +1457,7 @@ class App extends React.Component {
     this.onDoDelete = this.onDoDelete.bind(this);
     this.onDoCreate = this.onDoCreate.bind(this);
     this.onDoSave = this.onDoSave.bind(this);
+    this.onSaveShortcut = this.onSaveShortcut.bind(this);
     this.onCancelEdit = this.onCancelEdit.bind(this);
     this.onUpdateTableBorderSettings = this.onUpdateTableBorderSettings.bind(this);
     this.handleClick = this.handleClick.bind(this);
@@ -1465,6 +1466,20 @@ class App extends React.Component {
   }
   componentDidMount() {
     this.refs.rowsFilter.focus();
+    document.addEventListener("keydown", this.onSaveShortcut);
+  }
+  componentWillUnmount() {
+    document.removeEventListener("keydown", this.onSaveShortcut);
+  }
+  onSaveShortcut(e) {
+    let {model} = this.props;
+    if (e.key == "Enter" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+      && !e.repeat && !e.isComposing && !e.defaultPrevented
+      && (model.editMode == "update" || model.editMode == "create")
+      && model.spinnerCount == 0 && this.refs.saveButton && !this.refs.saveButton.disabled) {
+      e.preventDefault();
+      this.refs.saveButton.click();
+    }
   }
   onUseAllTab(e) {
     let {model} = this.props;
@@ -1713,10 +1728,11 @@ class App extends React.Component {
           }, "Cancel"),
           h("button", {
             name: "saveBtn",
+            ref: "saveButton",
             title:
-              model.editMode == "update" ? "Save the values of this record"
+              model.editMode == "update" ? "Save the values of this record (Command+Enter)"
               : model.editMode == "delete" ? "Delete this record"
-              : model.editMode == "create" ? "Save the values as a new record"
+              : model.editMode == "create" ? "Save the values as a new record (Command+Enter)"
               : null,
             className: "button " + (model.editMode == "delete" ? "button-destructive" : "button-brand"),
             disabled: model.spinnerCount != 0 ? true : false,
