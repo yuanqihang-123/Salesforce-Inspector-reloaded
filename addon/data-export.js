@@ -1116,6 +1116,7 @@ class Model {
     this.activeTabIndex = this.queryTabs.length - 1;
     this.saveQueryTabs();
     this.didUpdate();
+    this.focusQueryInput();
   }
 
   removeQueryTab(index) {
@@ -1148,6 +1149,13 @@ class Model {
     }
     this.updatedExportedData();
     this.didUpdate();
+    this.focusQueryInput();
+  }
+
+  focusQueryInput() {
+    if (localStorage.getItem("disableQueryInputAutoFocus") !== "true") {
+      this.queryInput?.focus();
+    }
   }
 
   updateCurrentTabQuery(query) {
@@ -1548,9 +1556,12 @@ class App extends React.Component {
     model.setQueryInput(queryInput);
     model.soqlPrompt = this.refs.prompt;
     //Set the cursor focus on query text area
-    if (localStorage.getItem("disableQueryInputAutoFocus") !== "true"){
-      queryInput.focus();
-    }
+    model.focusQueryInput();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        model.focusQueryInput();
+      }
+    });
 
     function queryAutocompleteEvent() {
       model.queryAutocompleteHandler();
@@ -1583,10 +1594,12 @@ class App extends React.Component {
     });
 
     addEventListener("keydown", e => {
-      if ((e.ctrlKey && e.key == "Enter") || e.key == "F5") {
+      if (((e.ctrlKey || e.metaKey) && e.key == "Enter") || e.key == "F5") {
         e.preventDefault();
-        model.doExport();
-        model.didUpdate();
+        if (!model.isWorking && !e.repeat && !e.isComposing) {
+          model.doExport();
+          model.didUpdate();
+        }
       }
     });
 
@@ -1729,7 +1742,7 @@ class App extends React.Component {
           h("div", {className: "autocomplete-header"},
             h("span", {}, model.autocompleteResults.title),
             h("div", {className: "flex-right"},
-              h("button", {tabIndex: 1, disabled: model.isWorking, onClick: this.onExport, title: "Ctrl+Enter / F5", className: "highlighted button-margin"}, "Run Export"),
+              h("button", {tabIndex: 1, disabled: model.isWorking, onClick: this.onExport, title: "Command+Enter / Ctrl+Enter / F5", className: "highlighted button-margin"}, "Run Export"),
               displayButton("export-query", this.state.hideButtonsOption) ? h("button", {tabIndex: 2, onClick: this.onCopyQuery, title: "Copy query url", className: "copy-id button-margin"}, "Export Query") : null,
               h("button", {tabIndex: 3, onClick: this.onQueryPlan, title: "Run Query Plan", className: "button-margin"}, "Query Plan"),
               h("a", {tabIndex: 4, className: "button", hidden: !model.autocompleteResults.sobjectName, href: model.showDescribeUrl(), target: "_blank", title: "Show field info for the " + model.autocompleteResults.sobjectName + " object"}, model.autocompleteResults.sobjectName + " Field Info"),
@@ -1753,7 +1766,7 @@ class App extends React.Component {
             h("a", {href: "https://developer.salesforce.com/docs/platform/graphql/guide/query-record-examples.html", target: "_blank"}, ", GraphQL"),
             " query in the box above and press Export."),
           h("p", {}, "Press Ctrl+Space to insert all field name autosuggestions or to load suggestions for field values."),
-          h("p", {}, "Press Ctrl+Enter or F5 to execute the export."),
+          h("p", {}, "Press Command+Enter, Ctrl+Enter or F5 to execute the export."),
           h("p", {}, "Those shortcuts can be customized in chrome://extensions/shortcuts"),
           h("p", {}, "Supports the full SOQL language. The columns in the CSV output depend on the returned data. Using subqueries may cause the output to grow rapidly. Bulk API is not supported. Large data volumes may freeze or crash your browser.")
         ),
