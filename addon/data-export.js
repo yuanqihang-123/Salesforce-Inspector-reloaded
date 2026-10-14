@@ -5,66 +5,8 @@ import {getLinkTarget, nullToEmptyString, displayButton, PromptTemplate, Constan
 import {Enumerable, DescribeInfo, copyToClipboard, initScrollTable, s} from "./data-load.js";
 import {getRecordLoginLinks} from "./record-login.js";
 
-class QueryHistory {
-  constructor(storageKey, max) {
-    this.storageKey = storageKey;
-    this.max = max;
-    this.list = this._get();
-  }
-
-  _get() {
-    let history;
-    try {
-      history = JSON.parse(localStorage[this.storageKey]);
-    } catch (e) {
-      console.error(e);
-    }
-    if (!Array.isArray(history)) {
-      history = [];
-    }
-    // A previous version stored just strings. Skip entries from that to avoid errors.
-    history = history.filter(e => typeof e == "object");
-    this.sort(this.storageKey, history);
-    return history;
-  }
-
-  add(entry) {
-    let history = this._get();
-    let historyIndex = history.findIndex(e => e.query == entry.query && e.useToolingApi == entry.useToolingApi);
-    if (historyIndex > -1) {
-      history.splice(historyIndex, 1);
-    }
-    history.splice(0, 0, entry);
-    if (history.length > this.max) {
-      history.pop();
-    }
-    localStorage[this.storageKey] = JSON.stringify(history);
-    this.sort(this.storageKey, history);
-  }
-
-  remove(entry) {
-    let history = this._get();
-    let historyIndex = history.findIndex(e => e.query == entry.query && e.useToolingApi == entry.useToolingApi);
-    if (historyIndex > -1) {
-      history.splice(historyIndex, 1);
-    }
-    localStorage[this.storageKey] = JSON.stringify(history);
-    this.sort(this.storageKey, history);
-  }
-
-  clear() {
-    localStorage.removeItem(this.storageKey);
-    this.list = [];
-  }
-
-  sort(storageKey, history) {
-    //sort only saved query not history
-    if (storageKey === "insextSavedQueryHistory") {
-      history.sort((a, b) => (a.query > b.query) ? 1 : ((b.query > a.query) ? -1 : 0));
-    }
-    this.list = history;
-  }
-}
+import {QueryHistory, queryBaseline} from "./query-history.js";
+import {QueryHistoryPanel} from "./query-history-panel.js";
 
 class Model {
   constructor({sfHost, args}) {
@@ -143,7 +85,7 @@ class Model {
 
     this.queryTabs = [];
     this.activeTabIndex = 0;
-    this.loadQueryTabs();
+    this.loadQueryTabs(args.has("query"));
   }
 
   updatedExportedData() {
@@ -194,7 +136,9 @@ class Model {
   }
   setQueryInput(queryInput) {
     this.queryInput = queryInput;
-    queryInput.value = this.initialQuery;
+    queryInput.value = this.queryTabs[this.activeTabIndex].query;
+    this.queryTooling = !!this.queryTabs[this.activeTabIndex].queryTooling;
+    this.queryAll = !!this.queryTabs[this.activeTabIndex].queryAll;
     this.initialQuery = null;
   }
   toggleHelp() {
@@ -911,6 +855,7 @@ class Model {
     let vm = this; // eslint-disable-line consistent-this
     let exportedData = new RecordTable(vm);
     exportedData.isTooling = vm.queryTooling;
+    let executionQueryAll = vm.queryAll;
     exportedData.describeInfo = vm.describeInfo;
     exportedData.sfHost = vm.sfHost;
     vm.initPerf();
@@ -963,7 +908,13 @@ class Model {
           vm.didUpdate();
           return pr;
         }
-        vm.queryHistory.add({query, useToolingApi: exportedData.isTooling});
+        try {
+          vm.queryHistory.add({query, useToolingApi: exportedData.isTooling, lastExecutedAt: Date.now()});
+          vm.historyError = "";
+        } catch {
+          vm.historyError = "Query succeeded, but its history could not be saved.";
+        }
+        vm.queryTabs[vm.activeTabIndex].baseline = queryBaseline(query, exportedData.isTooling, executionQueryAll);
         if (recs == 0) {
           vm.isWorking = false;
           vm.exportStatus = "No data exported." + (total > 0 ? ` ${total} record${s(total)}.` : "");
@@ -1091,14 +1042,18 @@ class Model {
     };
   }
 
-  loadQueryTabs() {
+  loadQueryTabs(explicitQuery = false) {
     const savedTabs = localStorage.getItem(`${this.sfHost}_queryTabs`);
     if (savedTabs) {
       this.queryTabs = JSON.parse(savedTabs);
     } else {
       this.queryTabs = [{name: "Query 1", query: this.initialQuery, queryTooling: this.queryTooling, queryAll: this.queryAll, results: null}];
     }
+    if (explicitQuery) {
+      Object.assign(this.queryTabs[0], {query: this.initialQuery, queryTooling: this.queryTooling, queryAll: this.queryAll, results: null});
+    }
     this.activeTabIndex = 0;
+    this.queryTabs.forEach(tab => { tab.baseline = queryBaseline(tab.query, tab.queryTooling, tab.queryAll); });
   }
 
   saveQueryTabs() {
@@ -1114,7 +1069,7 @@ class Model {
 
   addQueryTab() {
     const newTabName = `Query ${this.queryTabs.length + 1}`;
-    this.queryTabs.push({name: newTabName, query: "", queryTooling: false, queryAll: false, results: null});
+    this.queryTabs.push({name: newTabName, query: "", queryTooling: false, queryAll: false, results: null, baseline: queryBaseline("", false, false)});
     this.activeTabIndex = this.queryTabs.length - 1;
     this.saveQueryTabs();
     this.didUpdate();
@@ -1186,6 +1141,42 @@ class Model {
       this.queryTabs[this.activeTabIndex].name = newName;
       this.saveQueryTabs();
     }
+  }
+
+  hasQueryEdits() {
+    let query = this.queryInput.value;
+    return query.trim() !== "" && this.queryTabs[this.activeTabIndex].baseline !== queryBaseline(query, this.queryTooling, this.queryAll);
+  }
+
+  loadHistoryQuery(entry, newTab) {
+    if (this.isWorking) { return; }
+    let oldTabs = this.queryTabs;
+    let oldIndex = this.activeTabIndex;
+    let tabs = oldTabs.map(tab => ({...tab}));
+    Object.assign(tabs[oldIndex], {query: this.queryInput.value, queryTooling: this.queryTooling, queryAll: this.queryAll});
+    let tooling = !!entry.useToolingApi;
+    let all = tooling || newTab ? false : this.queryAll;
+    let baseline = queryBaseline(entry.query, tooling, all);
+    if (newTab) {
+      let number = tabs.length + 1;
+      while (tabs.some(tab => tab.name === `Query ${number}`)) { number++; }
+      tabs.push({name: `Query ${number}`, query: entry.query, queryTooling: tooling, queryAll: all, results: null, baseline});
+    } else {
+      let tab = tabs[oldIndex];
+      if (queryBaseline(tab.query, tab.queryTooling, tab.queryAll) !== baseline) { tab.results = null; }
+      Object.assign(tab, {query: entry.query, queryTooling: tooling, queryAll: all, baseline});
+    }
+    this.queryTabs = tabs;
+    try {
+      this.saveQueryTabs();
+    } catch (error) {
+      this.queryTabs = oldTabs;
+      throw error;
+    }
+    this.exportError = null;
+    this.setActiveTab(newTab ? tabs.length - 1 : oldIndex);
+    this.queryAutocompleteHandler();
+    this.didUpdate();
   }
 
   getCurrentTabQuery() {
@@ -1683,26 +1674,7 @@ class App extends React.Component {
               h("option", {value: null, disabled: true, defaultValue: true, hidden: true}, "Templates"),
               model.queryTemplates.map(q => h("option", {key: q, value: q}, q))
             ),
-            h("div", {className: "button-group"},
-              h("select", {value: JSON.stringify(model.selectedHistoryEntry), onChange: this.onSelectHistoryEntry, className: "query-history"},
-                h("option", {value: JSON.stringify(null), disabled: true}, "Query History"),
-                model.queryHistory.list.map(q => h("option", {key: JSON.stringify(q), value: JSON.stringify(q)}, q.query.substring(0, 300)))
-              ),
-              h("button", {onClick: this.onClearHistory, title: "Clear Query History"}, "Clear")
-            ),
-            h("div", {className: "pop-menu saveOptions", hidden: !model.expandSavedOptions},
-              h("a", {href: "#", onClick: this.onRemoveFromHistory, title: "Remove query from saved history"}, "Remove Saved Query"),
-              h("a", {href: "#", onClick: this.onClearSavedHistory, title: "Clear saved history"}, "Clear Saved Queries")
-            ),
-            h("div", {className: "button-group"},
-              h("select", {value: JSON.stringify(model.selectedSavedEntry), onChange: this.onSelectSavedEntry, className: "query-history"},
-                h("option", {value: JSON.stringify(null), disabled: true}, "Saved Queries"),
-                model.savedHistory.list.map(q => h("option", {key: JSON.stringify(q), value: JSON.stringify(q)}, q.query.substring(0, 300)))
-              ),
-              h("input", {placeholder: "Query Label", type: "save", value: model.queryName, onInput: this.onSetQueryName}),
-              h("button", {onClick: this.onAddToHistory, title: "Add query to saved history"}, "Save Query"),
-              h("button", {className: model.expandSavedOptions ? "toggle contract" : "toggle expand", title: "Show More Options", onClick: this.onToggleSavedOptions}, h("div", {className: "button-toggle-icon"}))
-            ),
+            h(QueryHistoryPanel, {model}),
           ),
           h("div", {className: "query-options"},
             h("label", {},

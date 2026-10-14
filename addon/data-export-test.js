@@ -544,7 +544,7 @@ export async function dataExportTest(test) {
     {query: "select Id from Inspector_Test__c where name = 'no such name'", useToolingApi: false},
     {query: "select Name, Lookup__r.Name from Inspector_Test__c order by Name", useToolingApi: false},
     {query: "select Name, Checkbox__c, Number__c from Inspector_Test__c order by Name", useToolingApi: false}
-  ], vm.queryHistory.list);
+  ], vm.queryHistory.list.map(({query, useToolingApi}) => ({query, useToolingApi})));
   vm.selectedHistoryEntry = vm.queryHistory.list[2];
   vm.selectHistoryEntry();
   assertEquals("select count() from Inspector_Test__c", queryInput.value);
