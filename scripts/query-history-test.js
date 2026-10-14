@@ -8,6 +8,96 @@ function memoryStorage(initial) {
   return {getItem: () => value, setItem: (key, next) => { value = next; }, removeItem: () => { value = null; }};
 }
 
+test("SOQL semantic history identity", async t => {
+  "use strict";
+  const {QueryHistory, historyKey} = await import("../addon/query-history.js");
+  const key = query => historyKey({query, useToolingApi: false});
+  const first = "SELECT Id,Name from User where IsActive = true and RP_StatusEventType__c = 'Manual Creation'";
+  const latest = "SELECT Name, Id from User where RP_StatusEventType__c = 'Manual Creation'  and IsActive = true";
+  await t.test("requested example keeps only the latest successful original and timestamp", () => {
+    const storage = memoryStorage(null);
+    const history = new QueryHistory("insextQueryHistory", 100, storage);
+    history.add({query: first, lastExecutedAt: 1});
+    history.add({query: "SELECT Id FROM Account", lastExecutedAt: 2});
+    history.add({query: latest, lastExecutedAt: 3});
+    assert.deepEqual(history.list, [{query: latest, lastExecutedAt: 3}, {query: "SELECT Id FROM Account", lastExecutedAt: 2}]);
+    assert.deepEqual(new QueryHistory("insextQueryHistory", 100, storage).list, history.list);
+  });
+  await t.test("field order, keyword case, whitespace and comments are immaterial", () => {
+    assert.equal(key(first), key(latest));
+    assert.equal(key("SELECT Account.Name, Id FROM Contact WHERE Age__c>=10"), key(" select id, account . name FROM /* from User */ contact\nWHERE age__c >= 10 "));
+    assert.equal(key("SELECT Id FROM Account WHERE Name='A  B'"), key("SELECT Id FROM Account WHERE Name = 'A  B' // trailing"));
+  });
+  await t.test("boolean reordering preserves grouping, precedence and NOT", () => {
+    const prefix = "SELECT Id FROM Account WHERE ";
+    assert.equal(key(prefix + "A__c=1 AND (B__c=2 AND C__c=3)"), key(prefix + "C__c=3 AND A__c=1 AND B__c=2"));
+    assert.equal(key(prefix + "A__c=1 AND (B__c=2 OR C__c=3)"), key(prefix + "(C__c=3 OR B__c=2) AND (A__c=1)"));
+    assert.equal(key(prefix + "NOT (A__c=1 OR B__c=2)"), key(prefix + "NOT (B__c=2 OR A__c=1)"));
+    assert.notEqual(key(prefix + "A__c=1 AND (B__c=2 OR C__c=3)"), key(prefix + "(A__c=1 AND B__c=2) OR C__c=3"));
+    assert.notEqual(key(prefix + "A__c=1 AND B__c=2"), key(prefix + "A__c=1 OR B__c=2"));
+  });
+  await t.test("subqueries, functions, escaped literals and IN predicates retain boundaries", () => {
+    assert.equal(key("SELECT COUNT(Id), Name FROM Account"), key("SELECT Name, count( id ) FROM Account"));
+    assert.equal(key("SELECT Id, (SELECT Id, Name FROM Contacts WHERE A__c=1 AND B__c=2) FROM Account"), key("SELECT (SELECT Name, Id FROM Contacts WHERE B__c=2 AND A__c=1), Id FROM Account"));
+    assert.equal(key("SELECT Id FROM Account WHERE Id IN (SELECT AccountId FROM Contact WHERE A__c=1 AND B__c=2)"), key("SELECT Id FROM Account WHERE Id IN (SELECT AccountId FROM Contact WHERE B__c=2 AND A__c=1)"));
+    const literal = "'O\\'Brien AND from User'";
+    assert.equal(key(`SELECT Id, Name FROM Account WHERE Name=${literal} AND A__c=1`), key(`SELECT Name,Id FROM Account WHERE A__c=1 AND Name = ${literal}`));
+    assert.notEqual(key("SELECT Id FROM Account WHERE Name IN ('a,b', 'c')"), key("SELECT Id FROM Account WHERE Name IN ('a', 'b,c')"));
+  });
+  await t.test("differences affecting results never collapse", () => {
+    const query = "SELECT Id, Name FROM Account WHERE Name='Manual Creation' AND A__c=1";
+    for (const different of [
+      query.replace("Id, Name", "Id"),
+      query.replace("Account", "Contact"),
+      query.replace("A__c=1", "A__c=2"),
+      query.replace("A__c=1", "B__c=1"),
+      query.replace("A__c=1", "A__c!=1"),
+      query.replace("Manual Creation", "Manual  Creation"),
+      query.replace("Manual Creation", "manual Creation"),
+      query + " LIMIT 1",
+      query + " OFFSET 1",
+      query + " WITH SECURITY_ENFORCED",
+      query + " ALL ROWS"
+    ]) { assert.notEqual(key(query), key(different), different); }
+    assert.notEqual(key(query + " ORDER BY Id, Name"), key(query + " ORDER BY Name, Id"));
+    assert.notEqual(key(query + " ORDER BY Id ASC"), key(query + " ORDER BY Id DESC"));
+    assert.notEqual(key("SELECT Id FROM Account WHERE A__c=10"), key("SELECT Id FROM Account WHERE A__c=1 0"));
+    assert.notEqual(historyKey({query, useToolingApi: true}), key(query));
+  });
+  await t.test("unknown and malformed syntax falls back to exact text", () => {
+    for (const query of ["FIND {hello} RETURNING Account(Id)", "SELECT Id FROM Account WHERE Name='broken", "SELECT Id FROM Account WHERE (A__c=1", "SELECT TYPEOF Owner WHEN User THEN Name END FROM Account", "SELECT Id FROM Account WHERE Id=:binding"]) {
+      assert.notEqual(key(query), key(query + " "));
+    }
+  });
+  await t.test("legacy duplicates collapse newest-first and persist on next success", () => {
+    const newest = {query: latest, lastExecutedAt: 3};
+    const older = {query: first};
+    const tooling = {...older, useToolingApi: true};
+    const storage = memoryStorage(JSON.stringify([newest, older, tooling]));
+    const history = new QueryHistory("insextQueryHistory", 100, storage);
+    assert.deepEqual(history.list, [newest, tooling]);
+    history.add({query: "SELECT Id FROM Contact", lastExecutedAt: 4});
+    assert.equal(JSON.parse(storage.getItem()).length, 3);
+    assert.equal(history.remove(older), true);
+    assert.deepEqual(history.list, [{query: "SELECT Id FROM Contact", lastExecutedAt: 4}, tooling]);
+  });
+  await t.test("failed equivalent replacement does not publish the new version", () => {
+    const original = {query: first, lastExecutedAt: 1};
+    const storage = memoryStorage(JSON.stringify([original]));
+    const history = new QueryHistory("insextQueryHistory", 100, storage);
+    storage.setItem = () => { throw new Error("quota"); };
+    assert.throws(() => history.add({query: latest, lastExecutedAt: 2}));
+    assert.deepEqual(history.list, [original]);
+    assert.deepEqual(JSON.parse(storage.getItem()), [original]);
+  });
+  await t.test("manual saved queries retain their exact text and labels", () => {
+    const history = new QueryHistory("insextSavedQueryHistory", 100, memoryStorage(null));
+    history.add({query: first, label: "first"});
+    history.add({query: latest, label: "latest"});
+    assert.equal(history.list.length, 2);
+  });
+});
+
 test("query history data and tab integration", async t => {
   "use strict";
   const {QueryHistory, filterHistory, queryObject, querySummary, previewTokens, queryBaseline} = await import("../addon/query-history.js");
@@ -95,6 +185,50 @@ test("query history data and tab integration", async t => {
     });
     return vm;
   }
+  await t.test("actual export success replaces equivalent text and results; failure preserves history", async () => {
+    class ExportRecords {
+      constructor() { this.records = []; this.totalSize = -1; }
+      addToTable(records) { this.records.push(...records); }
+    }
+    const first = "SELECT Id, Name FROM User WHERE IsActive=true AND RP_StatusEventType__c='Manual Creation'";
+    const latest = "SELECT Name, Id FROM User WHERE RP_StatusEventType__c='Manual Creation' AND IsActive=true";
+    const record = {Id: "005example", Name: "Latest", attributes: {type: "User"}};
+    const failure = Object.assign(new Error("Query failed"), {name: "SalesforceRestError"});
+    const responses = [{records: [], done: true, totalSize: 0}, {records: [record], done: true, totalSize: 1}, failure];
+    const conn = {rest() {
+      const response = responses.shift();
+      return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
+    }};
+    const ExportModel = new Function("queryBaseline", "localStorage", "RecordTable", "sfConn", "s", body + "\nreturn Model;")(queryBaseline, storage, ExportRecords, conn, count => count === 1 ? "" : "s");
+    const vm = model();
+    Object.setPrototypeOf(vm, ExportModel.prototype);
+    Object.assign(vm, {
+      queryHistory: new QueryHistory("insextQueryHistory", 100, memoryStorage(null)),
+      initPerf() {},
+      markPerf() {},
+      setResultsFilter() {},
+      updateCurrentTabName() {},
+      saveQueryTabs() {},
+      setQueryMethod(data) { data.queryMethod = "query"; },
+      spinFor(promise) { this.pendingExport = promise; }
+    });
+    vm.queryInput.value = first;
+    vm.doExport();
+    await vm.pendingExport;
+    assert.equal(vm.queryHistory.list.length, 1);
+    vm.queryInput.value = latest;
+    vm.doExport();
+    await vm.pendingExport;
+    assert.equal(vm.queryHistory.list.length, 1);
+    assert.equal(vm.queryHistory.list[0].query, latest);
+    assert.deepEqual(vm.queryTabs[0].results.records, [record]);
+    const saved = JSON.stringify(vm.queryHistory.list);
+    vm.queryInput.value = first;
+    vm.doExport();
+    await vm.pendingExport;
+    assert.equal(vm.exportError, "Query failed");
+    assert.equal(JSON.stringify(vm.queryHistory.list), saved);
+  });
   await t.test("dirty detection compares successful baseline, including modes", () => {
     let vm = model();
     assert.equal(vm.hasQueryEdits(), false);
@@ -156,6 +290,16 @@ test("history panel interactions", async t => {
     component.state.selected = historyKey(a);
     return {model, component};
   }
+  await t.test("equivalent replacement preserves selection and loads the latest original", () => {
+    const {model, component} = panel();
+    const latest = {query: " select id from account ", useToolingApi: false, lastExecutedAt: 50};
+    model.queryHistory.add(latest);
+    component.refresh();
+    assert.equal(component.state.selected, historyKey(a));
+    assert.deepEqual(component.selected(), latest);
+    component.load(true);
+    assert.deepEqual(model.loads, [{entry: latest, newTab: true}]);
+  });
   await t.test("load requires replacement confirmation, while new tab preserves edits", () => {
     let {model, component} = panel();
     component.load(false);
