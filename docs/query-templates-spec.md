@@ -17,20 +17,20 @@ Export Query 保留 Templates 和 History 两个入口。Templates 打开时清�
 
 ## 内置查询场景
 
-六个内置模板均生成完整 SOQL，默认 limit 为 200，可填写 1–2000 的整数。记录查询默认 SELECT Id，以及存在的字符串类型 nameField；时间查询另加对应时间字段。分组查询返回分组字段与 COUNT(Id) recordCount。
+六个内置模板均生成完整 SOQL，不再提供 Record limit 参数，生成的查询不附加 LIMIT。记录查询默认 SELECT Id，以及存在的字符串类型 nameField；时间查询另加对应时间字段。分组查询返回分组字段与 COUNT(Id) recordCount。
 
 | 模板 | 参数 | 生成行为 |
 | --- | --- | --- |
-| Find records by ID | 对象、一个或多个 ID、limit | 单个 ID 使用 =，多个 ID 使用 IN |
-| Recently created records | 对象、天数、limit | CreatedDate = LAST_N_DAYS:n，按 CreatedDate DESC |
-| Recently modified records | 对象、天数、limit | LastModifiedDate = LAST_N_DAYS:n，按 LastModifiedDate DESC |
-| Search a text field | 对象、字段、关键词、limit | field LIKE '%keyword%' |
-| Count by field | 对象、分组字段、limit | GROUP BY field，按 COUNT(Id) DESC |
-| Find duplicate values | 对象、分组字段、limit | 排除 null，GROUP BY field，HAVING COUNT(Id) > 1，按 COUNT(Id) DESC |
+| Find records by ID | 对象、一个或多个 ID | 单个 ID 使用 =，多个 ID 使用 IN |
+| Recently created records | 对象、天数 | CreatedDate = LAST_N_DAYS:n，按 CreatedDate DESC |
+| Recently modified records | 对象、天数 | LastModifiedDate = LAST_N_DAYS:n，按 LastModifiedDate DESC |
+| Search a text field | 对象、字段、关键词 | field LIKE '%keyword%' |
+| Count by field | 对象、分组字段 | GROUP BY field，按 COUNT(Id) DESC |
+| Find duplicate values | 对象、分组字段 | 排除 null，GROUP BY field，HAVING COUNT(Id) > 1，按 COUNT(Id) DESC |
 
 ID 支持 15 或 18 位字母数字，逗号、分号或空白分隔，重复 ID 去重；不检查 ID 校验和或所属对象。天数支持 1–3650 的整数。LAST_N_DAYS 包含今天，界面明确显示 includes today；日期边界由 Salesforce 的用户设置决定，不能理解为精确过去 n×24 小时。[Salesforce 日期与日期字面量](https://developer.salesforce.com/docs/platform/salesforce-soql-sosl/guide/sforce-api-calls-soql-select-dateformats.html)
 
-对象输入和字段参数复用 DescribeInfo 缓存。对象候选只列 queryable 对象，接受 API name 并显示 label；字段候选显示 label 和 API name。内置搜索字段只提供 filterable 的 string、textarea、email、phone、url 字段。分组字段要求 groupable，重复值模板还要求 filterable；时间字段必须存在且 filterable、sortable。更换对象或 API 模式后清空内置字段选择。
+对象输入和字段参数复用 DescribeInfo 缓存。对象候选只列 queryable 对象，接受 API name 并显示 label；忽略大小写匹配 API name 和 label，按 API name 精确、label 精确、API name 前缀、label 前缀、API name 包含、label 包含的顺序排序，同级按 API name 排序。对象候选支持上下键、Enter 选择和 Escape 关闭；字段候选显示 label 和 API name。内置搜索字段只提供 filterable 的 string、textarea、email、phone、url 字段。分组字段要求 groupable，重复值模板还要求 filterable；时间字段必须存在且 filterable、sortable。更换对象或 API 模式后清空内置字段选择。
 
 未选择对象、元数据加载中、加载失败、字段不存在或参数不合法时显示提示，禁止载入。依赖元数据的模板在数据到达后随页面更新重新生成预览。对象 describe 加载失败时提示重新打开 Data Export 重试。
 
@@ -42,7 +42,7 @@ ID 支持 15 或 18 位字母数字，逗号、分号或空白分隔，重复 ID
 
 填写参数时实时生成完整查询，使用现有 SOQL 高亮和格式化预览；复制预览文本不修改模板、编辑器或历史。无效参数显示提示并清空生成预览，避免载入过期查询。
 
-Load query 只载入当前内部查询标签页；当前有未成功执行的修改时显示 Replace the current query? Your edits will be overwritten.，提供 Cancel、Open in new tab、Replace。取消保留原编辑。Open in new tab 保存原标签页实时文本、模式和结果，再创建并激活内部新标签页；新页没有结果。两种方式都不自动执行，包括 Enter 点击载入按钮时。
+Load query 只载入当前内部查询标签页；当前有未成功执行的修改时显示 Replace the current query? Your edits will be overwritten.，提供 Cancel、Open in new tab、Replace。取消保留原编辑。Open in new tab 保存原标签页实时文本、模式和结果，再创建并激活内部新标签页；新页没有结果。点击这两个按钮只载入。参数填写有效后，在参数输入或 Load query 按钮上按 Enter 会载入并执行 Run export；若有替换确认，确认 Replace 或 Open in new tab 后继续执行。参数无效、导出中、输入法组合输入、重复按键或载入失败时不执行。Record IDs 中 Shift+Enter 保留换行。Object 候选中 Enter 先选中非精确匹配的对象，再按 Enter 执行；已精确匹配时直接执行。
 
 载入复用 loadHistoryQuery：先持久化标签页，成功后更新编辑器、模式、标签页名和自动补全。持久化失败保留原标签页与编辑器，面板保持打开并显示错误；不同查询或模式清空旧结果。Tooling API 强制关闭 queryAll；当前标签页载入 Data API 保留原 queryAll，新标签页默认 false。
 
@@ -83,7 +83,7 @@ My templates 支持 Edit template 和 Delete template。编辑保留原 id，保
 | 编号 | 场景 | 预期 |
 | --- | --- | --- |
 | AC01 | 当前查询为 Account，打开 Templates | 继承 Account 和 API 模式，搜索框获得焦点 |
-| AC02 | 选择最近创建，使用默认参数 | 生成包含 CreatedDate、LAST_N_DAYS:7、倒序及 LIMIT 200 的查询 |
+| AC02 | 选择最近创建，使用默认参数 | 生成包含 CreatedDate、LAST_N_DAYS:7、倒序且不附加 LIMIT 的查询 |
 | AC03 | 单个、多个或重复 ID | 正确生成 = 或 IN，并去重；非法 ID 禁止载入 |
 | AC04 | 搜索关键词含单引号、%、_ | 正确转义，关键词按字面匹配 |
 | AC05 | 分组或重复值模板 | 正确生成聚合、排序；重复值排除 null 并 HAVING count > 1 |
@@ -100,6 +100,6 @@ My templates 支持 Edit template 和 Delete template。编辑保留原 id，保
 
 ## 验证与范围
 
-自动化覆盖六类查询生成、五种参数校验、字面量转义、旧配置兼容、存储失败、参数转换、预览不改编辑器、替换保护、执行中阻止载入以及标签页持久化失败。与 query-history-test 和 record-login-test 一起运行，共 62 项测试通过。
+自动化覆盖六类查询生成、五种参数校验、字面量转义、旧配置兼容、存储失败、参数转换、预览不改编辑器、替换保护、执行中阻止载入以及标签页持久化失败。与 query-history-test 和 record-login-test 一起运行，共 67 项测试通过，包含对象匹配排序、Enter 加载执行及失败保护。
 
 本地浏览器以模拟 Account 元数据检查桌面和 390px 窄屏布局、参数预览、创建保存、自定义模板载入新标签页、替换确认和取消。真实 Salesforce 的对象权限、Tooling API 对象支持、聚合查询及查询执行结果仍需集成验收。第一版不包含模板共享、市场、AI 生成或跨对象参数推断。

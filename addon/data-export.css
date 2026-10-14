@@ -916,6 +916,12 @@ svg.icon:hover {
 .template-parameters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; }
 .template-parameter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .template-parameter input, .template-parameter select, .template-parameter textarea { width: 100%; box-sizing: border-box; margin: 0; }
+.template-object-picker { position: relative; align-self: start; }
+.template-object-options { position: absolute; top: 100%; left: 0; right: 0; z-index: 3; max-height: 240px; overflow: auto; background: white; border: 1px solid #c9c7c5; border-radius: 4px; box-shadow: 0 4px 12px #0003; }
+.template-object-options [role="option"] { padding: 8px 10px; cursor: pointer; overflow-wrap: anywhere; }
+.template-object-options [role="option"].selected, .template-object-options [role="option"]:hover { background: #eef4ff; }
+.template-object-options strong, .template-object-options small { display: block; }
+.template-object-options small { color: #54698d; margin-top: 2px; }
 .template-parameters p { grid-column: 1 / -1; margin: 0; }
 .template-preview .history-actions { position: sticky; bottom: 0; background: white; flex-shrink: 0; }
 .template-editor { padding: 16px; overflow: auto; min-height: 0; }

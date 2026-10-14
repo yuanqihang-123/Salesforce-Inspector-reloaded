@@ -6,7 +6,7 @@ const {test} = require("node:test");
 const fs = require("node:fs/promises");
 const field = (name, type = "string", props = {}) => ({name, type, filterable: true, sortable: true, groupable: true, ...props});
 const describe = {name: "Account", fields: [field("Id", "id"), field("Name", "string", {nameField: true}), field("CreatedDate", "datetime"), field("LastModifiedDate", "datetime"), field("Industry", "picklist"), field("Description", "textarea", {filterable: false, groupable: false})]};
-const values = {object: "Account", limit: "200", days: "7", ids: "001000000000001AAA", field: "Name", keyword: "Acme"};
+const values = {object: "Account", days: "7", ids: "001000000000001AAA", field: "Name", keyword: "Acme"};
 function storage() {
   const data = new Map();
   return {getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value)};
@@ -15,7 +15,10 @@ test("built-in patterns validate metadata and input", async t => {
   const {buildQuery, builtInTemplates, quoteText} = await import("../addon/query-templates.js");
   await t.test("six useful patterns generate complete queries", () => {
     assert.equal(builtInTemplates.length, 6);
-    assert.equal(buildQuery("ids", values, describe), "SELECT Id, Name\nFROM Account\nWHERE Id = '001000000000001AAA'\nLIMIT 200");
+    for (const template of builtInTemplates) {
+      assert.doesNotMatch(buildQuery(template.id, values, describe), /\bLIMIT\b/i);
+    }
+    assert.equal(buildQuery("ids", values, describe), "SELECT Id, Name\nFROM Account\nWHERE Id = '001000000000001AAA'");
     assert.match(buildQuery("ids", {...values, ids: "001000000000001AAA,001000000000002AAA\n001000000000001AAA"}, describe), /IN \('001000000000001AAA', '001000000000002AAA'\)/);
     assert.match(buildQuery("created", values, describe), /CreatedDate = LAST_N_DAYS:7 ORDER BY CreatedDate DESC/);
     assert.match(buildQuery("modified", values, describe), /LastModifiedDate = LAST_N_DAYS:7 ORDER BY LastModifiedDate DESC/);
@@ -28,7 +31,7 @@ test("built-in patterns validate metadata and input", async t => {
     assert.match(buildQuery("search", {...values, keyword: "O'Brien_%"}, describe), /O\\'Brien\\_\\%/);
   });
   await t.test("unavailable, incompatible fields and invalid inputs are blocked", () => {
-    for (const [id, patch] of [["ids", {ids: "001bad"}], ["search", {field: "Description"}], ["search", {keyword: ""}], ["group", {field: "Description"}], ["created", {days: "0"}], ["created", {days: "1 OR Id != null"}], ["created", {limit: "2001"}], ["created", {object: "Account WHERE"}]]) {
+    for (const [id, patch] of [["ids", {ids: "001bad"}], ["search", {field: "Description"}], ["search", {keyword: ""}], ["group", {field: "Description"}], ["created", {days: "0"}], ["created", {days: "1 OR Id != null"}], ["created", {object: "Account WHERE"}]]) {
       assert.throws(() => buildQuery(id, {...values, ...patch}, describe));
     }
     assert.throws(() => buildQuery("created", values, {...describe, fields: describe.fields.filter(f => f.name !== "CreatedDate")}), /unavailable/);
@@ -83,10 +86,10 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
     setState(patch, callback) { Object.assign(this.state, patch); callback?.(); }
   }
   const names = ["React", "h", ...Object.keys(api), "querySummary", "previewTokens", "window"];
-  const Panel = new Function(...names, body + "\nreturn QueryTemplatePanel;")({Component}, () => null, ...Object.values(api), history.querySummary, history.previewTokens, {innerWidth: 1200, innerHeight: 800});
+  const Panel = new Function(...names, body + "\nreturn QueryTemplatePanel;")({Component}, (tag, props, ...children) => ({tag, props: props || {}, children}), ...Object.values(api), history.querySummary, history.previewTokens, {innerWidth: 1200, innerHeight: 800});
   function panel() {
     const loads = [];
-    const model = {queryInput: {value: "SELECT Id FROM Account", focus() {}}, queryTooling: false, isWorking: false, hasQueryEdits: () => false, loadHistoryQuery: (...args) => loads.push(args), describeInfo: {describeGlobal: () => ({globalStatus: "ready", globalDescribe: {sobjects: [{name: "Account", queryable: true}]}}), describeSobject: () => ({sobjectDescribe: describe, sobjectStatus: "ready"})}};
+    const model = {queryInput: {value: "SELECT Id FROM Account", focus() {}}, queryTooling: false, isWorking: false, hasQueryEdits: () => false, loadHistoryQuery: (...args) => loads.push(args), doExport: () => loads.push("run"), didUpdate() {}, describeInfo: {describeGlobal: () => ({globalStatus: "ready", globalDescribe: {sobjects: [{name: "Account", queryable: true}]}}), describeSobject: () => ({sobjectDescribe: describe, sobjectStatus: "ready"})}};
     const panel = new Panel({model});
     panel.cancel = {focus() {}};
     panel.state = {...panel.state, open: true, templates: api.builtInTemplates, selected: "created", tooling: false, values: {...values}};
@@ -126,6 +129,74 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
     assert.equal(p.state.open, true);
     assert.match(p.state.error, /Could not save/);
   });
+  await t.test("Enter loads before running, while clicks only load", () => {
+    const {panel: p, loads} = panel();
+    const event = {key: "Enter", target: {closest: () => true}, preventDefault() {}, stopPropagation() {}};
+    p.navigate(event);
+    assert.equal(loads.length, 2);
+    assert.match(loads[0][0].query, /LAST_N_DAYS:7/);
+    assert.equal(loads[1], "run");
+    const second = panel();
+    second.panel.load(false);
+    assert.equal(second.loads.length, 1);
+  });
+  await t.test("Enter respects validation, export activity, editing, composition and repeated keys", () => {
+    const event = {key: "Enter", target: {closest: () => true}, preventDefault() {}, stopPropagation() {}};
+    for (const state of [{editing: {}}, {replace: true}]) {
+      const {panel: p, loads} = panel();
+      Object.assign(p.state, state);
+      p.navigate(event);
+      assert.equal(loads.length, 0);
+    }
+    for (const flags of [{isComposing: true}, {repeat: true}, {shiftKey: true}]) {
+      const {panel: p, loads} = panel();
+      p.navigate({...event, ...flags});
+      assert.equal(loads.length, 0);
+    }
+    const {panel: p, model, loads} = panel();
+    model.isWorking = true;
+    p.navigate(event);
+    model.isWorking = false;
+    p.change("days", "0");
+    p.navigate(event);
+    assert.equal(loads.length, 0);
+  });
+  await t.test("Enter carries execution through replace confirmation and blocks it after save failure", () => {
+    const {panel: p, model, loads} = panel();
+    model.hasQueryEdits = () => true;
+    p.load(false, false, true);
+    assert.equal(p.state.replace, true);
+    assert.equal(p.state.runAfterLoad, true);
+    assert.equal(loads.length, 0);
+    p.load(false, true, p.state.runAfterLoad);
+    assert.equal(loads[1], "run");
+    const failed = panel();
+    failed.model.loadHistoryQuery = () => { throw new Error("quota"); };
+    failed.panel.load(false, false, true);
+    assert.equal(failed.loads.length, 0);
+    assert.equal(failed.panel.state.open, true);
+  });
+  await t.test("object picker selects API names; exact Enter loads and runs", () => {
+    const {panel: p, loads} = panel();
+    p.state.objectPicker = "object";
+    p.state.values.object = "acc";
+    const input = () => p.objectInput("Object", "object", p.currentMetadata(p.selected())).children[1];
+    const event = {key: "Enter", preventDefault() {}, stopPropagation() {}};
+    input().props.onKeyDown(event);
+    assert.equal(p.state.values.object, "Account");
+    assert.equal(loads.length, 0);
+    input().props.onFocus();
+    input().props.onKeyDown(event);
+    assert.equal(loads[1], "run");
+    const search = panel();
+    search.panel.state.selected = "search";
+    search.panel.state.objectPicker = "object";
+    search.panel.state.values.object = "account";
+    search.panel.objectInput("Object", "object", search.panel.currentMetadata(search.panel.selected())).children[1].props.onKeyDown(event);
+    assert.equal(search.panel.state.values.field, "Name");
+    assert.match(search.loads[0][0].query, /Name LIKE/);
+    assert.equal(search.loads[1], "run");
+  });
   await t.test("selecting an entire quoted value creates a typed parameter", () => {
     const {panel: p} = panel();
     const query = "SELECT Id FROM Account WHERE Name = 'Acme'";
@@ -136,4 +207,21 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
     assert.deepEqual(p.state.editing.parameters, [{name: "value1", type: "text", default: "Acme"}]);
     assert.equal(api.renderCustom(p.state.editing, {value1: "Other"}), "SELECT Id FROM Account WHERE Name = 'Other'");
   });
+});
+
+test("object suggestions rank exact names, labels, prefixes and substrings", async () => {
+  const {matchingObjects} = await import("../addon/query-templates.js");
+  const objects = [
+    {name: "BriefcaseAssignment", label: "Briefcase Assignment", queryable: true},
+    {name: "CaseArticle", queryable: true},
+    {name: "Case", label: "Case", queryable: true},
+    {name: "Ticket__c", label: "Case", queryable: true},
+    {name: "Other__c", label: "Case Detail", queryable: true},
+    {name: "Unqueryable", label: "Case", queryable: false},
+    {name: "Account", queryable: true}
+  ];
+  assert.deepEqual(matchingObjects(objects, " CaSe ").map(o => o.name), ["Case", "Ticket__c", "CaseArticle", "Other__c", "BriefcaseAssignment"]);
+  assert.equal(objects[0].name, "BriefcaseAssignment");
+  assert.equal(matchingObjects(objects, "nothing").length, 0);
+  assert.equal(matchingObjects(objects, "").length, 6);
 });

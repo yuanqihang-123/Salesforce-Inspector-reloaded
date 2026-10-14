@@ -16,6 +16,21 @@ export const starterTemplates = [
 export function quoteText(value) {
   return "'" + String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t") + "'";
 }
+export function matchingObjects(objects, input) {
+  let term = String(input || "").trim().toLowerCase();
+  let rank = object => {
+    let name = object.name.toLowerCase();
+    let label = (object.label || "").toLowerCase();
+    if (!term || name === term) { return 0; }
+    if (label === term) { return 1; }
+    if (name.startsWith(term)) { return 2; }
+    if (label.startsWith(term)) { return 3; }
+    if (name.includes(term)) { return 4; }
+    if (label.includes(term)) { return 5; }
+    return 6;
+  };
+  return objects.filter(o => o.queryable && rank(o) < 6).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
 function identifier(value) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) { throw new Error("Choose a valid object or field API name."); }
   return value;
@@ -75,7 +90,6 @@ export function buildQuery(id, values, describe) {
     if (!found) { throw new Error(`${name} is unavailable on ${describe.name}.`); }
     return found;
   };
-  let limit = integer(values.limit, "Record limit", 2000);
   let columns = [field("Id").name];
   let nameField = fields.find(f => f.nameField && f.type === "string");
   if (nameField && nameField.name !== "Id") { columns.push(nameField.name); }
@@ -99,10 +113,10 @@ export function buildQuery(id, values, describe) {
       suffix = `WHERE ${selected.name} LIKE '%${keyword}%'`;
     } else if (id === "group" || id === "duplicates") {
       if (!selected.groupable || (id === "duplicates" && !selected.filterable)) { throw new Error("Choose a groupable field (also filterable for duplicates)."); }
-      return `SELECT ${selected.name}, COUNT(Id) recordCount\nFROM ${describe.name}\n${id === "duplicates" ? `WHERE ${selected.name} != null\n` : ""}GROUP BY ${selected.name}\n${id === "duplicates" ? "HAVING COUNT(Id) > 1\n" : ""}ORDER BY COUNT(Id) DESC\nLIMIT ${limit}`;
+      return `SELECT ${selected.name}, COUNT(Id) recordCount\nFROM ${describe.name}\n${id === "duplicates" ? `WHERE ${selected.name} != null\n` : ""}GROUP BY ${selected.name}\n${id === "duplicates" ? "HAVING COUNT(Id) > 1\n" : ""}ORDER BY COUNT(Id) DESC`;
     } else { throw new Error("Unknown template."); }
   }
-  return `SELECT ${columns.join(", ")}\nFROM ${describe.name}\n${suffix}\nLIMIT ${limit}`;
+  return `SELECT ${columns.join(", ")}\nFROM ${describe.name}\n${suffix}`;
 }
 export function readTemplates(storage = localStorage) {
   let raw = storage.getItem(TEMPLATE_KEY);

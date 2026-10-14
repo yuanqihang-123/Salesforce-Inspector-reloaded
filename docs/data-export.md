@@ -35,9 +35,9 @@ Option available in Data Export tab
 
 ## Query templates
 
-Click **Templates** on Data Export to search common query patterns and preview a complete query before loading it. Built-in patterns cover record IDs, recently created or modified records, text search, grouped counts, and duplicate values. The panel uses the current query's object and API mode; object and field suggestions come from your Salesforce metadata.
+Click **Templates** on Data Export to search common query patterns and preview a complete query before loading it. Built-in patterns cover record IDs, recently created or modified records, text search, grouped counts, and duplicate values. The panel uses the current query's object and API mode; object and field suggestions come from your Salesforce metadata. Object matches prioritize exact API names and labels, then prefixes, then substrings; matching is case-insensitive.
 
-Fill in the parameters, then choose **Load query** or **Open in new tab**. Templates never run automatically. Loading over unsaved edits asks for confirmation. Recent-date patterns use `LAST_N_DAYS` and include today.
+Fill in the parameters, then press **Enter** to load the query and run the export. **Shift+Enter** adds a new line in Record IDs. Clicking **Load query** or **Open in new tab** only loads the query. Built-in templates have no Record limit input and generate queries without a `LIMIT` clause. Loading over unsaved edits asks for confirmation. Recent-date patterns use `LAST_N_DAYS` and include today.
 
 Choose **From current query** to save your own pattern. Name it, select a complete value in the pattern, and click **Make selection a parameter**. You can also enter `{{name}}` directly and configure its type and default value. Text parameters add and escape their own quotes; date parameters use `YYYY-MM-DD` for Date fields. Custom templates can be edited or deleted from the panel.
 
