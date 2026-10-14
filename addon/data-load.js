@@ -266,6 +266,29 @@ function renderCell(rt, cell, td) {
             });
           }
         }
+        // Data Export supplies this resolver; other table menus stay unchanged.
+        if (rt.getRecordLoginLinks && /^(005|003)/.test(recordId)) {
+          rt.getRecordLoginLinks(recordId).then(links => {
+            // A response can arrive after the user has dismissed the menu.
+            if (!pop.isConnected) {
+              return;
+            }
+            for (const link of links) {
+              const aLogin = document.createElement("a");
+              aLogin.href = link.href;
+              aLogin.target = "_blank";
+              aLogin.rel = "noopener noreferrer";
+              aLogin.textContent = link.label;
+              aLogin.className = "view-salesforce login-as";
+              const icon = document.createElement("div");
+              icon.className = "icon";
+              aLogin.prepend(icon);
+              pop.appendChild(aLogin);
+            }
+          }).catch(error => {
+            console.warn("Unable to resolve record login options", error);
+          });
+        }
       }
       const defaultOptions = {
         isCopy: true,

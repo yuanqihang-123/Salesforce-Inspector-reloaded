@@ -3,6 +3,7 @@ import {sfConn, apiVersion} from "./inspector.js";
 import {getLinkTarget, nullToEmptyString, displayButton, PromptTemplate, Constants} from "./utils.js";
 /* global initButton */
 import {Enumerable, DescribeInfo, copyToClipboard, initScrollTable, s} from "./data-load.js";
+import {getRecordLoginLinks} from "./record-login.js";
 
 class QueryHistory {
   constructor(storageKey, max) {
@@ -120,7 +121,8 @@ class Model {
     this.soqlPrompt = "";
     this.enableQueryTypoFix = localStorage.getItem("enableQueryTypoFix") == "true";
 
-    this.spinFor(sfConn.soap(sfConn.wsdl(apiVersion, "Partner"), "getUserInfo", {}).then(res => {
+    this.userInfoPromise = sfConn.soap(sfConn.wsdl(apiVersion, "Partner"), "getUserInfo", {});
+    this.spinFor(this.userInfoPromise.then(res => {
       this.userInfo = res.userFullName + " / " + res.userName + " / " + res.organizationName;
     }));
 
@@ -1265,6 +1267,9 @@ function RecordTable(vm) {
   };
 
   let rt = {
+    getRecordLoginLinks(recordId) {
+      return getRecordLoginLinks(vm.sfHost, recordId, vm.userInfoPromise);
+    },
     records: [],
     table: [],
     rowVisibilities: [],

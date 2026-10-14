@@ -1,5 +1,11 @@
 # Data Export
 
+## Log in as a user from query results
+
+Click a User ID in the results to see **Login As** when that user is active. Click a Contact ID to see **Log in to Experience as User** when the contact has an active external user with Experience Cloud site membership. If the user belongs to multiple sites, the menu offers a link for each site.
+
+The menu checks the user's current status when opened, so the query does not need to include `IsActive`. Inactive users and the currently logged-in user have no login option. Salesforce still enforces login permissions and login access policies. If the eligibility lookup fails, the existing record actions remain available.
+
 ## Select all fields in a query
 
 This functionality already exists in the legacy version but since many users don't know about it, I would like to document it.
