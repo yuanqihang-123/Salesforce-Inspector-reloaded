@@ -351,7 +351,7 @@ test("history panel interactions", async t => {
     component.navigate(event);
     assert.equal(model.runs, 1);
   });
-  await t.test("candidate rendering has exactly three rows and no Undo control", () => {
+  await t.test("candidate rendering omits empty clauses and has no Undo control", () => {
     let {component} = panel();
     global.window = {innerWidth: 1280, innerHeight: 900};
     const tree = component.render();
@@ -365,7 +365,7 @@ test("history panel interactions", async t => {
     visit(tree);
     const candidates = nodes.filter(node => node.props?.className === "history-select");
     assert.equal(candidates.length, 2);
-    assert.deepEqual(candidates[0].props.children.map(row => row.props.children), ["Id", "Account", "\u00a0"]);
+    assert.deepEqual(candidates[0].props.children.filter(Boolean).map(row => row.props.children), ["Id", "Account"]);
     assert.equal(nodes.some(node => node.type === "button" && String(node.props.children).includes("Undo")), false);
   });
   await t.test("failed load keeps the panel open and does not run", () => {

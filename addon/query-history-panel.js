@@ -170,7 +170,7 @@ export class QueryHistoryPanel extends React.Component {
                 h("button", {"data-history-row": "true", "data-selected": selected === key, "aria-pressed": selected === key, className: "history-select", title: `${time.title} · ${q.useToolingApi ? "Tooling API" : "Data API"}`, onClick: () => this.setState({selected: key, replace: false})},
                   h("span", {className: "history-summary history-fields"}, summary.fields),
                   h("strong", {className: "history-summary history-object"}, summary.object),
-                  h("span", {className: "history-summary history-clauses"}, summary.clauses || "\u00a0")
+                  summary.clauses && h("span", {className: "history-summary history-clauses"}, summary.clauses)
                 ),
                 h("button", {className: "history-delete", "aria-label": `Delete query: ${q.query}`, title: "Delete query", onClick: () => this.delete(q)}, "×")
               );

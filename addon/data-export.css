@@ -878,7 +878,7 @@ svg.icon:hover {
 .history-list > p, .history-list > button { margin: 12px; }
 .history-row { display: flex; border-bottom: 1px solid #eee; align-items: flex-start; }
 .history-row.selected { background: #eef4ff; border-left: 3px solid #0070d2; }
-.history-select { flex: 1; min-width: 0; padding: 12px; border: 0; background: transparent; color: inherit; text-align: left; height: auto; white-space: normal; }
+.history-select { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; height: auto; white-space: normal; }
 .history-select strong, .history-select small { display: block; }
 .history-summary { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 4px 0; font-family: monospace; font-size: 12px; line-height: 1.5; }
 .history-object { color: #005fb2; }
