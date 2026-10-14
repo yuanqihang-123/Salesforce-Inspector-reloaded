@@ -2,6 +2,7 @@
   "name": "salesforce-inspector",
   "scripts": {
     "eslint": "eslint .",
+    "test:soql-prompt": "node --test scripts/soql-prompt-test.js",
     "firefox-dev-build": "node scripts/dev-build.js firefox",
     "chrome-dev-build": "node scripts/dev-build.js chrome",
     "firefox-release-build": "node scripts/release-build.js firefox",

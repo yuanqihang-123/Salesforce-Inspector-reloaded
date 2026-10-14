@@ -1,5 +1,19 @@
 # Data Export
 
+## Copy a SOQL prompt for Gemini
+
+Click **Copy prompt for Gemini** below the query editor to open the assistant. It works independently of Agentforce and does not require an API key. Select a searchable **Object** and enter a request in **Describe your query**. Chinese, English and mixed field API names are supported. An ordinary SOQL query can supply the initial object; otherwise select it yourself. Editing the query does not change your chosen object.
+
+1. Optionally add and reorder **Common fields**, then click **Save common fields**. These are your personal definition of “key fields” for this browser, Salesforce host and object. No custom fields are assumed or installed as defaults. Without a saved definition, describe the fields explicitly; an ambiguous request for key fields asks Gemini to clarify.
+2. Use **Related fields** to load one parent relationship at a time. Select direct parent fields for the prompt, or add them to your common fields. For example, select the actual Profile and UserRole relationships on User to add `Profile.Name` and `UserRole.Name`. Only relationships with one target and one level are supported.
+3. If the request uses a picklist condition, expand **Include picklist values** and select the relevant fields. This includes their real API values and labels. Other picklist values are omitted.
+4. Review **Preview prompt**, including its field and character counts, then click **Copy prompt for Gemini**. The complete prompt contains the selected object's fields, field types and query capabilities, limited help text, verified parent paths, common fields and your original request. It does not add connection credentials, user identity, results, records or query history. Values you type into the request are preserved.
+5. Click **Open Gemini**, paste the prompt and submit it yourself. Review the response, paste the SOQL into the existing query editor and click **Run Export**. The extension does not submit anything to Gemini, select a model, read its reply, fill the query editor or run a query automatically.
+
+Saved fields are checked against currently visible Salesforce metadata. Missing fields, changed relationships or failed metadata loads block copying and show the affected paths. Remove or correct them and save the revised configuration, or use **Retry metadata** / **Refresh metadata**. A failed copy preserves the full preview; use **Select full prompt for manual copy** and your browser's copy shortcut. Prompts over 100,000 characters show a length warning and are not truncated; this threshold does not represent a Gemini context limit.
+
+Each query tab keeps its own assistant object and request in memory. Closing the panel preserves them; closing the page discards the drafts. Common fields remain saved locally. The assistant supports ordinary Data API queries; copying is disabled in Tooling API mode. It does not support child subqueries, polymorphic relationships or deeper parent paths, and it does not add a row limit unless requested. Salesforce remains the final authority on query validity and permissions. Check Gemini's output before exporting; prompt rules cannot guarantee that a model follows them.
+
 ## Log in as a user from query results
 
 Click a User ID in the results to see **Login As** when that user is active. Click a Contact ID to see **Log in to Experience as User** when the contact has an active external user with Experience Cloud site membership. If the user belongs to multiple sites, the menu offers a link for each site.

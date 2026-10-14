@@ -4,6 +4,8 @@ import {getLinkTarget, nullToEmptyString, displayButton, PromptTemplate, Constan
 /* global initButton */
 import {Enumerable, DescribeInfo, copyToClipboard, initScrollTable, s} from "./data-load.js";
 import {getRecordLoginLinks} from "./record-login.js";
+import {SoqlPromptController} from "./soql-prompt-controller.js";
+import {DataExportSoqlPromptPanel} from "./components/SoqlPromptPanel.js";
 
 class QueryHistory {
   constructor(storageKey, max) {
@@ -144,6 +146,13 @@ class Model {
     this.queryTabs = [];
     this.activeTabIndex = 0;
     this.loadQueryTabs();
+    this.soqlAssistant = new SoqlPromptController({
+      sfHost,
+      describeInfo: this.describeInfo,
+      onUpdate: () => this.didUpdate(),
+      copy: prompt => copyToClipboard(prompt, {notifyFailure: false})
+    });
+    this.soqlAssistant.activate(this.queryTabs[this.activeTabIndex], this.queryTooling);
   }
 
   updatedExportedData() {
@@ -389,6 +398,7 @@ class Model {
    * Supports subqueries in where clauses, but not in select clauses.
    */
   queryAutocompleteHandler(e = {}) {
+    this.soqlAssistant?.setTooling(this.queryTooling);
     let vm = this; // eslint-disable-line consistent-this
     let useToolingApi = vm.queryTooling;
     let query = vm.queryInput.value;
@@ -1115,7 +1125,7 @@ class Model {
   addQueryTab() {
     const newTabName = `Query ${this.queryTabs.length + 1}`;
     this.queryTabs.push({name: newTabName, query: "", queryTooling: false, queryAll: false, results: null});
-    this.activeTabIndex = this.queryTabs.length - 1;
+    this.setActiveTab(this.queryTabs.length - 1);
     this.saveQueryTabs();
     this.didUpdate();
     this.focusQueryInput();
@@ -1150,6 +1160,7 @@ class Model {
       this.exportStatus = "";
     }
     this.updatedExportedData();
+    this.soqlAssistant.activate(this.queryTabs[index], this.queryTooling);
     this.didUpdate();
     this.focusQueryInput();
   }
@@ -1743,6 +1754,7 @@ class App extends React.Component {
           style: {maxHeight: (model.winInnerHeight - 200) + "px"},
           onChange: this.onQueryInput
         }),
+        h(DataExportSoqlPromptPanel, {model}),
         h("div", {className: "autocomplete-box" + (model.expandAutocomplete ? " expanded" : "")},
           h("div", {className: "autocomplete-header"},
             h("span", {}, model.autocompleteResults.title),

@@ -45,6 +45,13 @@ Enumerable.prototype.concat.prototype = Enumerable.prototype;
 
 // @param didUpdate: A callback function to listen for updates to describe data
 export function DescribeInfo(spinFor, didUpdate) {
+  const listeners = new Set();
+  function notify(event = "update") {
+    for (const listener of [...listeners]) {
+      listener(event);
+    }
+    didUpdate();
+  }
   function initialState() {
     return {
       data: {global: {globalStatus: "pending", globalDescribe: null}, sobjects: null},
@@ -64,10 +71,10 @@ export function DescribeInfo(spinFor, didUpdate) {
         for (let sobjectDescribe of res.sobjects) {
           apiDescribes.sobjects.set(sobjectDescribe.name.toLowerCase(), {global: sobjectDescribe, sobject: {sobjectStatus: "pending", sobjectDescribe: null}});
         }
-        didUpdate();
+        notify();
       }, () => {
         apiDescribes.global.globalStatus = "loadfailed";
-        didUpdate();
+        notify();
       }));
     }
     return apiDescribes;
@@ -109,17 +116,22 @@ export function DescribeInfo(spinFor, didUpdate) {
         spinFor(sfConn.rest(sobjectInfo.global.urls.describe).then(res => {
           sobjectInfo.sobject.sobjectStatus = "ready";
           sobjectInfo.sobject.sobjectDescribe = res;
-          didUpdate();
+          notify();
         }, () => {
           sobjectInfo.sobject.sobjectStatus = "loadfailed";
-          didUpdate();
+          notify();
         }));
       }
       return sobjectInfo.sobject;
     },
+    // Additive subscription API for consumers that await cached metadata.
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     reloadAll() {
       sobjectAllDescribes = initialState();
-      didUpdate();
+      notify("reload");
     }
   };
 }
@@ -130,19 +142,22 @@ export function s(num, suffix = "s") {
 }
 
 // Copy text to the clipboard, without rendering it, since rendering is slow.
-export function copyToClipboard(value) {
+export function copyToClipboard(value, {notifyFailure = true} = {}) {
   if (parent && parent.isUnitTest) { // for unit tests
     parent.testClipboardValue = value;
-    return;
+    return true;
   }
   // Use execCommand to trigger an oncopy event and use an event handler to copy the text to the clipboard.
   // The oncopy event only works on editable elements, e.g. an input field.
+  const activeElement = document.activeElement;
+  let copied = false;
   let temp = document.createElement("input");
   // The oncopy event only works if there is something selected in the editable element.
   temp.value = "temp";
   temp.addEventListener("copy", e => {
     e.clipboardData.setData("text/plain", value);
     e.preventDefault();
+    copied = true;
   });
   document.body.appendChild(temp);
   try {
@@ -150,11 +165,13 @@ export function copyToClipboard(value) {
     temp.select();
     // Trigger the oncopy event
     let success = document.execCommand("copy");
-    if (!success) {
+    if ((!success || !copied) && notifyFailure) {
       alert("Copy failed");
     }
+    return success && copied;
   } finally {
     document.body.removeChild(temp);
+    activeElement?.focus({preventScroll: true});
   }
 }
 

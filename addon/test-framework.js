@@ -4,6 +4,7 @@ import {csvParseTest} from "./csv-parse-test.js";
 import {dataImportTest} from "./data-import-test.js";
 import {dataExportTest} from "./data-export-test.js";
 import {restExploreTest} from "./rest-explore-test.js";
+import {soqlPromptTest} from "./soql-prompt-test.js";
 
 let seenError = false;
 class Test {
@@ -127,7 +128,9 @@ addEventListener("load", () => {
       await dataImportTest(test);
       updateProgress("dataExportTest", "dataImportTest");
       await dataExportTest(test);
-      updateProgress(null, "dataExportTest");
+      updateProgress("soqlPromptTest", "dataExportTest");
+      await soqlPromptTest(test);
+      updateProgress("restExploreTest", "soqlPromptTest");
       await restExploreTest(test);
       updateProgress(null, "restExploreTest");
 
