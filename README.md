@@ -111,7 +111,7 @@ Thank you for shaping our extension's future! Your feedback makes it better.
 ### Local Installation
 
 1. Download or clone the repo.
-2. Checkout the releaseCandidate branch.
+2. Check out the `custom-base-1.27` branch. The current implementation is based on the 1.27 release.
 3. Open `chrome://extensions/`.
 4. Enable `Developer mode`.
 5. Click `Load unpacked`.
@@ -130,8 +130,7 @@ Before starting developments, create a feature request and explain the goal of i
 You can check for the [open issues](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues) and [check if any help is wanted](https://github.com/tprouvot/Salesforce-Inspector-reloaded/labels/%22help%20wanted%22)
 
 Before starting developments, create a feature request and explain the goal of it and the uses cases that it addresses.
-To submit a PR, please create a branch from releaseCandidate which is the work in progress next version.
-This branch will be merge into master when the new version is published on web store.
+To submit a PR, please create a branch from `custom-base-1.27`, which contains the custom implementation based on the 1.27 release.
 
 Make sure to update CHANGES.md file by describing the improvement / bugfix you realized.
 
