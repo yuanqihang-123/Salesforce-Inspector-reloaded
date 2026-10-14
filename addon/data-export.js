@@ -5,7 +5,7 @@ import {getLinkTarget, nullToEmptyString, displayButton, PromptTemplate, Constan
 import {Enumerable, DescribeInfo, copyToClipboard, initScrollTable, s} from "./data-load.js";
 import {getRecordLoginLinks} from "./record-login.js";
 
-import {QueryHistory, queryBaseline} from "./query-history.js";
+import {QueryHistory, queryBaseline, compactQueryWhitespace} from "./query-history.js";
 import {QueryHistoryPanel} from "./query-history-panel.js";
 
 class Model {
@@ -242,10 +242,16 @@ class Model {
     this.savedHistory.add({query: this.getQueryToSave(), useToolingApi: this.queryTooling});
   }
   removeFromHistory() {
-    this.savedHistory.remove({query: this.getQueryToSave(), useToolingApi: this.queryTooling});
+    const original = this.queryInput.value.trim();
+    const query = this.queryName != "" ? this.queryName + ":" + original : original;
+    // Older saved queries may still contain uncompressed whitespace.
+    if (!this.savedHistory.remove({query, useToolingApi: this.queryTooling})) {
+      this.savedHistory.remove({query: this.getQueryToSave(), useToolingApi: this.queryTooling});
+    }
   }
   getQueryToSave() {
-    return this.queryName != "" ? this.queryName + ":" + this.queryInput.value.trim() : this.queryInput.value.trim();
+    const query = compactQueryWhitespace(this.queryInput.value).trim();
+    return this.queryName != "" ? this.queryName + ":" + query : query;
   }
   autocompleteReload() {
     this.describeInfo.reloadAll();

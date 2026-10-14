@@ -1,4 +1,4 @@
-// Canonical keys are comparison-only: history always stores the latest original text.
+// Canonical keys are comparison-only: saved text retains the latest query order.
 export function historyKey(entry) {
   return JSON.stringify([soqlIdentity(entry.query), !!entry.useToolingApi]);
 }
@@ -25,7 +25,7 @@ function soqlIdentity(query) {
     return ["soql", canonicalQuery(tokens)];
   } catch {
     // Unknown syntax must never merge distinct queries by accident.
-    return ["text", query];
+    return ["text", compactQueryWhitespace(query)];
   }
 }
 
@@ -180,6 +180,9 @@ export class QueryHistory {
       ? JSON.stringify([entry.query, !!entry.useToolingApi]) : historyKey(entry);
   }
   add(entry) {
+    if (this.storageKey === "insextQueryHistory") {
+      entry = {...entry, query: compactQueryWhitespace(entry.query)};
+    }
     const key = this._key(entry);
     let history = this._get().filter(e => this._key(e) !== key);
     history.unshift(entry);
@@ -209,6 +212,16 @@ export function queryTokens(query) {
   let tokens = query.match(/'(?:\\.|''|[^'\\])*'|\/\*[\s\S]*?\*\/|--[^\n]*|\/\/[^\n]*|[A-Za-z_][\w.]*|\s+|./g) || [];
   if (tokens.some(t => t === "'" || t === '"') || tokens.join("") !== query) { return null; }
   return tokens;
+}
+// Compact only whitespace outside literals/comments, preserving query order.
+export function compactQueryWhitespace(query) {
+  const tokens = queryTokens(query);
+  if (!tokens) { return query; }
+  return tokens.map((token, i) => {
+    if (!/^\s+$/.test(token)) { return token; }
+    // A line comment must end before the next clause or field.
+    return /^(--|\/\/)/.test(tokens[i - 1] || "") ? "\n" : " ";
+  }).join("").trim();
 }
 export function queryObject(query) {
   let tokens = queryTokens(query);

@@ -10,18 +10,36 @@ function memoryStorage(initial) {
 
 test("SOQL semantic history identity", async t => {
   "use strict";
-  const {QueryHistory, historyKey} = await import("../addon/query-history.js");
+  const {QueryHistory, historyKey, compactQueryWhitespace} = await import("../addon/query-history.js");
   const key = query => historyKey({query, useToolingApi: false});
   const first = "SELECT Id,Name from User where IsActive = true and RP_StatusEventType__c = 'Manual Creation'";
   const latest = "SELECT Name, Id from User where RP_StatusEventType__c = 'Manual Creation'  and IsActive = true";
-  await t.test("requested example keeps only the latest successful original and timestamp", () => {
+  await t.test("requested example keeps only the latest successful order, compact whitespace and timestamp", () => {
     const storage = memoryStorage(null);
     const history = new QueryHistory("insextQueryHistory", 100, storage);
     history.add({query: first, lastExecutedAt: 1});
     history.add({query: "SELECT Id FROM Account", lastExecutedAt: 2});
     history.add({query: latest, lastExecutedAt: 3});
-    assert.deepEqual(history.list, [{query: latest, lastExecutedAt: 3}, {query: "SELECT Id FROM Account", lastExecutedAt: 2}]);
+    assert.deepEqual(history.list, [{query: compactQueryWhitespace(latest), lastExecutedAt: 3}, {query: "SELECT Id FROM Account", lastExecutedAt: 2}]);
     assert.deepEqual(new QueryHistory("insextQueryHistory", 100, storage).list, history.list);
+  });
+  await t.test("saving compacts whitespace without changing literals, comments or order", () => {
+    const query = "  SELECT  Name,\tId, (SELECT  Name, Id FROM Contacts)\n FROM  Account WHERE Name = 'O\\'Brien  AND  Co'\t AND Other__c = 'it''s  ok'  ORDER BY Name, Id  ";
+    const expected = "SELECT Name, Id, (SELECT Name, Id FROM Contacts) FROM Account WHERE Name = 'O\\'Brien  AND  Co' AND Other__c = 'it''s  ok' ORDER BY Name, Id";
+    const storage = memoryStorage(null);
+    const history = new QueryHistory("insextQueryHistory", 100, storage);
+    const entry = {query, useToolingApi: true, lastExecutedAt: 10};
+    history.add(entry);
+    assert.equal(history.list[0].query, expected);
+    assert.equal(JSON.parse(storage.getItem())[0].query, expected);
+    assert.equal(entry.query, query);
+    assert.equal(history.list[0].useToolingApi, true);
+    assert.equal(history.list[0].lastExecutedAt, 10);
+    assert.equal(history.remove(entry), true);
+    const comments = " SELECT  Id /* keep  spacing */ FROM Account -- keep  comment\n WHERE Name='A  B' // another\n AND Id != null ";
+    assert.equal(compactQueryWhitespace(comments), "SELECT Id /* keep  spacing */ FROM Account -- keep  comment\nWHERE Name='A  B' // another\nAND Id != null");
+    const broken = "SELECT  Id FROM Account WHERE Name='broken  text";
+    assert.equal(compactQueryWhitespace(broken), broken);
   });
   await t.test("field order, keyword case, whitespace and comments are immaterial", () => {
     assert.equal(key(first), key(latest));
@@ -64,10 +82,15 @@ test("SOQL semantic history identity", async t => {
     assert.notEqual(key("SELECT Id FROM Account WHERE A__c=10"), key("SELECT Id FROM Account WHERE A__c=1 0"));
     assert.notEqual(historyKey({query, useToolingApi: true}), key(query));
   });
-  await t.test("unknown and malformed syntax falls back to exact text", () => {
+  await t.test("unknown and malformed syntax falls back to compacted text without reordering", () => {
     for (const query of ["FIND {hello} RETURNING Account(Id)", "SELECT Id FROM Account WHERE Name='broken", "SELECT Id FROM Account WHERE (A__c=1", "SELECT TYPEOF Owner WHEN User THEN Name END FROM Account", "SELECT Id FROM Account WHERE Id=:binding"]) {
-      assert.notEqual(key(query), key(query + " "));
+      assert.notEqual(key(query), key(query + " LIMIT 1"));
     }
+    assert.equal(key("SELECT  Id FROM Account WHERE Id=:binding"), key(" SELECT Id FROM Account WHERE Id=:binding "));
+    const history = new QueryHistory("insextQueryHistory", 100, memoryStorage(null));
+    const entry = {query: "  SELECT  Id FROM Account WHERE Id=:binding  "};
+    history.add(entry);
+    assert.equal(history.remove(entry), true);
   });
   await t.test("legacy duplicates collapse newest-first and persist on next success", () => {
     const newest = {query: latest, lastExecutedAt: 3};
@@ -100,7 +123,7 @@ test("SOQL semantic history identity", async t => {
 
 test("query history data and tab integration", async t => {
   "use strict";
-  const {QueryHistory, filterHistory, queryObject, querySummary, previewTokens, queryBaseline} = await import("../addon/query-history.js");
+  const {QueryHistory, filterHistory, queryObject, querySummary, previewTokens, queryBaseline, compactQueryWhitespace} = await import("../addon/query-history.js");
   const a = {query: "SELECT Id FROM Account", useToolingApi: false, lastExecutedAt: 30};
   const b = {query: "SELECT Name FROM Contact", useToolingApi: false, lastExecutedAt: 20};
   const c = {query: "SELECT Name FROM ApexClass", useToolingApi: true, lastExecutedAt: 10};
@@ -167,7 +190,7 @@ test("query history data and tab integration", async t => {
   const source = await fs.readFile(require.resolve("../addon/data-export.js"), "utf8");
   const body = source.slice(source.indexOf("class Model {"), source.indexOf("\nfunction RecordTable"));
   const storage = memoryStorage(null);
-  const Model = new Function("queryBaseline", "localStorage", body + "\nreturn Model;")(queryBaseline, storage);
+  const Model = new Function("queryBaseline", "compactQueryWhitespace", "localStorage", body + "\nreturn Model;")(queryBaseline, compactQueryWhitespace, storage);
   function model() {
     const vm = Object.create(Model.prototype);
     Object.assign(vm, {
@@ -185,13 +208,29 @@ test("query history data and tab integration", async t => {
     });
     return vm;
   }
+  await t.test("manual save compacts query whitespace and preserves the query name and editor", () => {
+    const vm = model();
+    vm.queryName = "My  query";
+    vm.queryInput.value = "  SELECT  Name, Id\n FROM Account WHERE Name = 'A  B'  ";
+    vm.savedHistory = new QueryHistory("insextSavedQueryHistory", 100, memoryStorage(null));
+    vm.addToHistory();
+    assert.equal(vm.savedHistory.list[0].query, "My  query:SELECT Name, Id FROM Account WHERE Name = 'A  B'");
+    assert.equal(vm.queryInput.value, "  SELECT  Name, Id\n FROM Account WHERE Name = 'A  B'  ");
+    vm.removeFromHistory();
+    assert.equal(vm.savedHistory.list.length, 0);
+    vm.savedHistory.add({query: "My  query:" + vm.queryInput.value.trim(), useToolingApi: false});
+    vm.removeFromHistory();
+    assert.equal(vm.savedHistory.list.length, 0);
+    vm.queryName = "";
+    assert.equal(vm.getQueryToSave(), "SELECT Name, Id FROM Account WHERE Name = 'A  B'");
+  });
   await t.test("actual export success replaces equivalent text and results; failure preserves history", async () => {
     class ExportRecords {
       constructor() { this.records = []; this.totalSize = -1; }
       addToTable(records) { this.records.push(...records); }
     }
     const first = "SELECT Id, Name FROM User WHERE IsActive=true AND RP_StatusEventType__c='Manual Creation'";
-    const latest = "SELECT Name, Id FROM User WHERE RP_StatusEventType__c='Manual Creation' AND IsActive=true";
+    const latest = "  SELECT  Name, Id\nFROM User WHERE RP_StatusEventType__c='Manual Creation'  AND IsActive=true  ";
     const record = {Id: "005example", Name: "Latest", attributes: {type: "User"}};
     const failure = Object.assign(new Error("Query failed"), {name: "SalesforceRestError"});
     const responses = [{records: [], done: true, totalSize: 0}, {records: [record], done: true, totalSize: 1}, failure];
@@ -220,7 +259,9 @@ test("query history data and tab integration", async t => {
     vm.doExport();
     await vm.pendingExport;
     assert.equal(vm.queryHistory.list.length, 1);
-    assert.equal(vm.queryHistory.list[0].query, latest);
+    assert.equal(vm.queryHistory.list[0].query, compactQueryWhitespace(latest));
+    assert.equal(vm.queryInput.value, latest);
+    assert.equal(vm.queryTabs[0].baseline, queryBaseline(latest, false, true));
     assert.deepEqual(vm.queryTabs[0].results.records, [record]);
     const saved = JSON.stringify(vm.queryHistory.list);
     vm.queryInput.value = first;
