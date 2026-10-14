@@ -33,14 +33,17 @@ Option available in Data Export tab
 
 <img width="809" alt="Disable query input" src="https://github.com/user-attachments/assets/6f928f58-e437-47aa-b2d2-378f534e7a08">
 
-## Add custom query templates
+## Query templates
 
-Enter value in "Query Templates" option with your custom queries separated by "//" character.
-Example:
+Click **Templates** on Data Export to search common query patterns and preview a complete query before loading it. Built-in patterns cover record IDs, recently created or modified records, text search, grouped counts, and duplicate values. The panel uses the current query's object and API mode; object and field suggestions come from your Salesforce metadata.
 
-`SELECT Id FROM// SELECT Id FROM WHERE//SELECT Id FROM WHERE IN//SELECT Id FROM WHERE LIKE//SELECT Id FROM ORDER BY//SELECT ID FROM MYTEST__c//SELECT ID WHERE`
+Fill in the parameters, then choose **Load query** or **Open in new tab**. Templates never run automatically. Loading over unsaved edits asks for confirmation. Recent-date patterns use `LAST_N_DAYS` and include today.
 
-<img width="895" alt="image" src="https://github.com/tprouvot/Salesforce-Inspector-reloaded/assets/35368290/16490965-ec4f-42d7-a534-8f24febe1ee3">
+Choose **From current query** to save your own pattern. Name it, select a complete value in the pattern, and click **Make selection a parameter**. You can also enter `{{name}}` directly and configure its type and default value. Text parameters add and escape their own quotes; date parameters use `YYYY-MM-DD` for Date fields. Custom templates can be edited or deleted from the panel.
+
+Existing `//`-separated configuration remains available under **Legacy snippets** and can be converted into a parameterized template. SOSL and GraphQL examples are available as query starters in their own group.
+
+See [Query Templates Spec](query-templates-spec.md) for validation, persistence, and acceptance details.
 
 ## Customize Select all fields in a query shortcut
 

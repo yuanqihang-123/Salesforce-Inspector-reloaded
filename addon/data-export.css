@@ -903,3 +903,29 @@ svg.icon:hover {
 .history-select { line-height: 1.4; }
 .history-select:hover, .history-select:focus { background: #eef4ff; color: inherit; border: 0; }
 .history-confirm { flex-shrink: 0; }
+
+/* Query templates share the history panel's placement and focus conventions. */
+.template-panel { max-height: 80vh; }
+.template-body { height: 520px; max-height: calc(80vh - 90px); flex: 1; }
+.template-list { flex-basis: 32%; }
+.template-list h3 { font-size: 12px; margin: 14px 12px 6px; color: #54698d; }
+.template-select { padding: 10px 12px; }
+.template-select small { margin-top: 4px; }
+.template-preview { overflow: auto; }
+.template-preview pre { flex: 1 0 120px; }
+.template-parameters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; }
+.template-parameter { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.template-parameter input, .template-parameter select, .template-parameter textarea { width: 100%; box-sizing: border-box; margin: 0; }
+.template-parameters p { grid-column: 1 / -1; margin: 0; }
+.template-preview .history-actions { position: sticky; bottom: 0; background: white; flex-shrink: 0; }
+.template-editor { padding: 16px; overflow: auto; min-height: 0; }
+.template-editor > label { display: block; margin-bottom: 12px; }
+.template-editor > label > input:not([type="checkbox"]), .template-editor textarea { display: block; width: 100%; box-sizing: border-box; }
+.template-editor textarea { font-family: monospace; }
+.template-definition { display: flex; gap: 16px; margin-bottom: 12px; }
+.template-definition label { display: flex; flex: 1; flex-direction: column; }
+.template-error { padding: 12px; margin: 0; color: #ba0517; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .template-list { flex: 0 0 140px; }
+  .template-parameters { grid-template-columns: 1fr; }
+}

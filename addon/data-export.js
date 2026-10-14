@@ -7,6 +7,7 @@ import {getRecordLoginLinks} from "./record-login.js";
 
 import {QueryHistory, queryBaseline, compactQueryWhitespace} from "./query-history.js";
 import {QueryHistoryPanel} from "./query-history-panel.js";
+import {QueryTemplatePanel} from "./query-template-panel.js";
 
 class Model {
   constructor({sfHost, args}) {
@@ -50,15 +51,6 @@ class Model {
     this.autocompleteProgress = {};
     this.exportProgress = {};
     this.queryName = "";
-    this.queryTemplates = localStorage.getItem("queryTemplates") ? this.queryTemplates = localStorage.getItem("queryTemplates").split("//") : [
-      "SELECT Id FROM ",
-      'FIND {""}\nIN Name Fields\nRETURNING Contact(Name, Phone)',
-      "{\n\tuiapi {\n\t\tquery {\n\t\t\tContact {\n\t\t\t\tedges {\n\t\t\t\t\t node {\n\t\t\t\t\t\tId\n\t\t\t\t\t\tName { value }\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}",
-      "SELECT Id FROM WHERE",
-      "SELECT Id FROM WHERE IN",
-      "SELECT Id FROM WHERE LIKE",
-      "SELECT Id FROM WHERE ORDER BY"
-    ];
     this.separator = getSeparator();
     this.soqlPrompt = "";
     this.enableQueryTypoFix = localStorage.getItem("enableQueryTypoFix") == "true";
@@ -168,14 +160,6 @@ class Model {
       this.queryTooling = this.selectedHistoryEntry.useToolingApi;
       this.queryAutocompleteHandler();
       this.selectedHistoryEntry = null;
-    }
-  }
-  selectQueryTemplate() {
-    this.queryInput.value = this.selectedQueryTemplate.trimStart();
-    this.queryInput.focus();
-    let indexPos = this.queryInput.value.toLowerCase().indexOf("from ");
-    if (indexPos !== -1) {
-      this.queryInput.setRangeText("", indexPos + 5, indexPos + 5, "end");
     }
   }
   initPerf() {
@@ -1337,7 +1321,6 @@ class App extends React.Component {
     this.onQueryToolingChange = this.onQueryToolingChange.bind(this);
     this.onPrefHideRelationsChange = this.onPrefHideRelationsChange.bind(this);
     this.onSelectHistoryEntry = this.onSelectHistoryEntry.bind(this);
-    this.onSelectQueryTemplate = this.onSelectQueryTemplate.bind(this);
     this.onClearHistory = this.onClearHistory.bind(this);
     this.onSelectSavedEntry = this.onSelectSavedEntry.bind(this);
     this.onAddToHistory = this.onAddToHistory.bind(this);
@@ -1388,12 +1371,6 @@ class App extends React.Component {
     let {model} = this.props;
     model.selectedHistoryEntry = JSON.parse(e.target.value);
     model.selectHistoryEntry();
-    model.didUpdate();
-  }
-  onSelectQueryTemplate(e) {
-    let {model} = this.props;
-    model.selectedQueryTemplate = e.target.value;
-    model.selectQueryTemplate();
     model.didUpdate();
   }
   onClearHistory(e) {
@@ -1676,10 +1653,7 @@ class App extends React.Component {
         h("div", {className: "query-controls"},
           h("h1", {}, "Export Query"),
           h("div", {className: "query-history-controls"},
-            h("select", {value: "", onChange: this.onSelectQueryTemplate, className: "query-history", title: "Check documentation to customize templates"},
-              h("option", {value: null, disabled: true, defaultValue: true, hidden: true}, "Templates"),
-              model.queryTemplates.map(q => h("option", {key: q, value: q}, q))
-            ),
+            h(QueryTemplatePanel, {model}),
             h(QueryHistoryPanel, {model}),
           ),
           h("div", {className: "query-options"},
