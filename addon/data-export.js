@@ -7,6 +7,7 @@ import {getRecordLoginLinks} from "./record-login.js";
 
 import {QueryHistory, queryBaseline, compactQueryWhitespace} from "./query-history.js";
 import {QueryHistoryPanel} from "./query-history-panel.js";
+import {recordTemplateRun} from "./query-templates.js";
 import {QueryTemplatePanel} from "./query-template-panel.js";
 
 class Model {
@@ -846,6 +847,8 @@ class Model {
     let exportedData = new RecordTable(vm);
     exportedData.isTooling = vm.queryTooling;
     let executionQueryAll = vm.queryAll;
+    const templateSource = vm.queryTabs[vm.activeTabIndex].templateSource;
+    const templateId = templateSource && templateSource.query === vm.queryInput.value && templateSource.tooling === !!vm.queryTooling ? templateSource.id : null;
     exportedData.describeInfo = vm.describeInfo;
     exportedData.sfHost = vm.sfHost;
     vm.initPerf();
@@ -898,11 +901,16 @@ class Model {
           vm.didUpdate();
           return pr;
         }
-        try {
-          vm.queryHistory.add({query, useToolingApi: exportedData.isTooling, lastExecutedAt: Date.now()});
-          vm.historyError = "";
-        } catch {
-          vm.historyError = "Query succeeded, but its history could not be saved.";
+        if (data.totalSize !== -1) {
+          try {
+            vm.queryHistory.add({query, useToolingApi: exportedData.isTooling, lastExecutedAt: Date.now()});
+            vm.historyError = "";
+          } catch {
+            vm.historyError = "Query succeeded, but its history could not be saved.";
+          }
+        }
+        if (templateId && data.totalSize !== -1) {
+          try { recordTemplateRun(templateId); } catch { vm.historyError = "Query succeeded, but its template run count could not be saved."; }
         }
         vm.queryTabs[vm.activeTabIndex].baseline = queryBaseline(query, exportedData.isTooling, executionQueryAll);
         if (recs == 0) {
@@ -1052,7 +1060,8 @@ class Model {
       name: tab.name,
       query: tab.query,
       queryTooling: tab.queryTooling,
-      queryAll: tab.queryAll
+      queryAll: tab.queryAll,
+      templateSource: tab.templateSource
     }));
     localStorage.setItem(`${this.sfHost}_queryTabs`, JSON.stringify(tabsToSave));
   }
@@ -1156,6 +1165,7 @@ class Model {
       if (queryBaseline(tab.query, tab.queryTooling, tab.queryAll) !== baseline) { tab.results = null; }
       Object.assign(tab, {query: entry.query, queryTooling: tooling, queryAll: all, baseline});
     }
+    tabs[newTab ? tabs.length - 1 : oldIndex].templateSource = entry.templateId ? {id: entry.templateId, query: entry.query, tooling} : null;
     this.queryTabs = tabs;
     try {
       this.saveQueryTabs();
@@ -1658,12 +1668,12 @@ class App extends React.Component {
           ),
           h("div", {className: "query-options"},
             h("label", {},
-              h("input", {type: "checkbox", checked: model.queryAll, onChange: this.onQueryAllChange, disabled: model.queryTooling}),
+              h("input", {type: "checkbox", tabIndex: -1, checked: model.queryAll, onChange: this.onQueryAllChange, disabled: model.queryTooling}),
               " ",
               h("span", {}, "Deleted/Archived Records?")
             ),
             h("label", {title: "With the tooling API you can query more metadata, but you cannot query regular data"},
-              h("input", {type: "checkbox", checked: model.queryTooling, onChange: this.onQueryToolingChange, disabled: model.queryAll}),
+              h("input", {type: "checkbox", tabIndex: -1, checked: model.queryTooling, onChange: this.onQueryToolingChange, disabled: model.queryAll}),
               " ",
               h("span", {}, "Tooling API?")
             ),

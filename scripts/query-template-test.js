@@ -80,13 +80,15 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
   const source = await fs.readFile(new URL("../addon/query-template-panel.js", `file://${__filename}`), "utf8");
   const api = await import("../addon/query-templates.js");
   const history = await import("../addon/query-history.js");
+  global.React = require("../addon/react.js");
+  const {QueryLibraryBrowser, queryLibraryRows, queryLibraryPosition} = await import("../addon/query-library-browser.js");
   const body = source.slice(source.indexOf("export class")).replace("export class", "class");
   class Component {
     constructor(props) { this.props = props; }
     setState(patch, callback) { Object.assign(this.state, patch); callback?.(); }
   }
-  const names = ["React", "h", ...Object.keys(api), "querySummary", "previewTokens", "window"];
-  const Panel = new Function(...names, body + "\nreturn QueryTemplatePanel;")({Component}, (tag, props, ...children) => ({tag, props: props || {}, children}), ...Object.values(api), history.querySummary, history.previewTokens, {innerWidth: 1200, innerHeight: 800});
+  const names = ["React", "h", ...Object.keys(api), "querySummary", "previewTokens", "QueryLibraryBrowser", "queryLibraryRows", "queryLibraryPosition", "window"];
+  const Panel = new Function(...names, body + "\nreturn QueryTemplatePanel;")({Component}, (tag, props, ...children) => ({tag, props: props || {}, children}), ...Object.values(api), history.querySummary, history.previewTokens, QueryLibraryBrowser, queryLibraryRows, queryLibraryPosition, {innerWidth: 1200, innerHeight: 800});
   function panel() {
     const loads = [];
     const model = {queryInput: {value: "SELECT Id FROM Account", focus() {}}, queryTooling: false, isWorking: false, hasQueryEdits: () => false, loadHistoryQuery: (...args) => loads.push(args), doExport: () => loads.push("run"), didUpdate() {}, describeInfo: {describeGlobal: () => ({globalStatus: "ready", globalDescribe: {sobjects: [{name: "Account", queryable: true}]}}), describeSobject: () => ({sobjectDescribe: describe, sobjectStatus: "ready"})}};
@@ -95,6 +97,52 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
     panel.state = {...panel.state, open: true, templates: api.builtInTemplates, selected: "created", tooling: false, values: {...values}};
     return {panel, model, loads};
   }
+  await t.test("search ranks globally and scrolls to the first option without taking input focus", () => {
+    const {panel: p} = panel();
+    const browser = new QueryLibraryBrowser(p.libraryProps());
+    Object.defineProperty(browser, "props", {get: () => p.libraryProps()});
+    Object.defineProperty(browser, "search", {get: () => p.search});
+    p.state.templates = [
+      {id: "prefix", name: "Case history", kind: "builtin", runCount: 40},
+      {id: "exact", name: "Case", kind: "custom", parameters: [], runCount: 1},
+      {id: "popular", name: "Case", kind: "starter", runCount: 10}
+    ];
+    assert.deepEqual(p.rows().map(t => t.id), ["prefix", "popular", "exact"]);
+    let focused = 0;
+    const list = {scrollTop: 420, focus() { focused++; }};
+    p.search = {};
+    global.document = {activeElement: p.search};
+    browser.list = list;
+    browser.changeSearch("中文Case");
+    assert.equal(p.state.search, "Case");
+    assert.deepEqual(p.rows().map(t => t.id), ["popular", "exact", "prefix"]);
+    assert.equal(p.state.selected, "popular");
+    assert.equal(list.scrollTop, 0);
+    assert.equal(focused, 0);
+    assert.equal(document.activeElement, p.search);
+    list.scrollTop = 200;
+    browser.changeSearch("Case history");
+    assert.equal(p.state.search, "Case history");
+    assert.equal(p.state.selected, "prefix");
+    assert.equal(list.scrollTop, 0);
+    browser.changeSearch("missing");
+    assert.equal(p.state.selected, null);
+    assert.equal(document.activeElement, p.search);
+  });
+  await t.test("template panel renders the same shared search and option component as history", () => {
+    const {panel: p} = panel();
+    const browsers = [];
+    function visit(node) {
+      if (Array.isArray(node)) { node.forEach(visit); return; }
+      if (!node || typeof node !== "object") { return; }
+      if (node.tag === QueryLibraryBrowser) { browsers.push(node); }
+      visit(node.children);
+    }
+    visit(p.render());
+    assert.equal(browsers.length, 1);
+    assert.equal(browsers[0].props.listClassName, "template-list");
+    assert.equal(new QueryLibraryBrowser(browsers[0].props).rows().length, api.builtInTemplates.length);
+  });
   await t.test("selection and parameter changes never touch the editor or execute", () => {
     const {panel: p, model, loads} = panel();
     p.choose(api.builtInTemplates[2]);
@@ -224,4 +272,19 @@ test("object suggestions rank exact names, labels, prefixes and substrings", asy
   assert.equal(objects[0].name, "BriefcaseAssignment");
   assert.equal(matchingObjects(objects, "nothing").length, 0);
   assert.equal(matchingObjects(objects, "").length, 6);
+});
+
+test("template run counts persist independently for built-in and custom templates", async () => {
+  const api = await import("../addon/query-templates.js");
+  const store = storage();
+  api.saveTemplate({id: "mine", name: "Mine", query: "SELECT Id FROM Account", parameters: []}, store);
+  api.recordTemplateRun("ids", store);
+  api.recordTemplateRun("ids", store);
+  api.recordTemplateRun("mine", store);
+  const rows = api.readTemplates(store);
+  assert.equal(rows.find(t => t.id === "ids").runCount, 2);
+  assert.equal(rows.find(t => t.id === "mine").runCount, 1);
+  assert.equal(rows.find(t => t.id === "created").runCount, 0);
+  api.saveTemplate({...rows.find(t => t.id === "mine"), name: "Renamed"}, store);
+  assert.equal(api.readTemplates(store).find(t => t.id === "mine").runCount, 1);
 });

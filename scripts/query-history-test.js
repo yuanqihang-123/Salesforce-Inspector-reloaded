@@ -20,7 +20,7 @@ test("SOQL semantic history identity", async t => {
     history.add({query: first, lastExecutedAt: 1});
     history.add({query: "SELECT Id FROM Account", lastExecutedAt: 2});
     history.add({query: latest, lastExecutedAt: 3});
-    assert.deepEqual(history.list, [{query: compactQueryWhitespace(latest), lastExecutedAt: 3}, {query: "SELECT Id FROM Account", lastExecutedAt: 2}]);
+    assert.deepEqual(history.list, [{query: compactQueryWhitespace(latest), lastExecutedAt: 3, runCount: 2}, {query: "SELECT Id FROM Account", lastExecutedAt: 2, runCount: 1}]);
     assert.deepEqual(new QueryHistory("insextQueryHistory", 100, storage).list, history.list);
   });
   await t.test("saving compacts whitespace without changing literals, comments or order", () => {
@@ -98,11 +98,11 @@ test("SOQL semantic history identity", async t => {
     const tooling = {...older, useToolingApi: true};
     const storage = memoryStorage(JSON.stringify([newest, older, tooling]));
     const history = new QueryHistory("insextQueryHistory", 100, storage);
-    assert.deepEqual(history.list, [newest, tooling]);
+    assert.deepEqual(history.list, [{...newest, runCount: 2}, tooling]);
     history.add({query: "SELECT Id FROM Contact", lastExecutedAt: 4});
     assert.equal(JSON.parse(storage.getItem()).length, 3);
     assert.equal(history.remove(older), true);
-    assert.deepEqual(history.list, [{query: "SELECT Id FROM Contact", lastExecutedAt: 4}, tooling]);
+    assert.deepEqual(history.list, [{query: "SELECT Id FROM Contact", lastExecutedAt: 4, runCount: 1}, tooling]);
   });
   await t.test("failed equivalent replacement does not publish the new version", () => {
     const original = {query: first, lastExecutedAt: 1};
@@ -238,7 +238,8 @@ test("query history data and tab integration", async t => {
       const response = responses.shift();
       return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
     }};
-    const ExportModel = new Function("queryBaseline", "localStorage", "RecordTable", "sfConn", "s", body + "\nreturn Model;")(queryBaseline, storage, ExportRecords, conn, count => count === 1 ? "" : "s");
+    const templateRuns = [];
+    const ExportModel = new Function("recordTemplateRun", "queryBaseline", "localStorage", "RecordTable", "sfConn", "s", body + "\nreturn Model;")(id => templateRuns.push(id), queryBaseline, storage, ExportRecords, conn, count => count === 1 ? "" : "s");
     const vm = model();
     Object.setPrototypeOf(vm, ExportModel.prototype);
     Object.assign(vm, {
@@ -252,10 +253,13 @@ test("query history data and tab integration", async t => {
       spinFor(promise) { this.pendingExport = promise; }
     });
     vm.queryInput.value = first;
+    vm.queryTabs[0].templateSource = {id: "test-template", query: first, tooling: false};
     vm.doExport();
     await vm.pendingExport;
     assert.equal(vm.queryHistory.list.length, 1);
+    assert.deepEqual(templateRuns, ["test-template"]);
     vm.queryInput.value = latest;
+    vm.queryTabs[0].templateSource.query = latest;
     vm.doExport();
     await vm.pendingExport;
     assert.equal(vm.queryHistory.list.length, 1);
@@ -265,9 +269,12 @@ test("query history data and tab integration", async t => {
     assert.deepEqual(vm.queryTabs[0].results.records, [record]);
     const saved = JSON.stringify(vm.queryHistory.list);
     vm.queryInput.value = first;
+    vm.queryTabs[0].templateSource = {id: "test-template", query: first, tooling: false};
     vm.doExport();
     await vm.pendingExport;
     assert.equal(vm.exportError, "Query failed");
+    assert.deepEqual(templateRuns, ["test-template", "test-template"]);
+    assert.equal(vm.queryHistory.list[0].runCount, 2);
     assert.equal(JSON.stringify(vm.queryHistory.list), saved);
   });
   await t.test("dirty detection compares successful baseline, including modes", () => {
@@ -318,6 +325,7 @@ test("history panel interactions", async t => {
   global.React = require("../addon/react.js");
   const {QueryHistory, historyKey} = await import("../addon/query-history.js");
   const {QueryHistoryPanel} = await import("../addon/query-history-panel.js");
+  const {QueryLibraryBrowser} = await import("../addon/query-library-browser.js");
   const a = {query: "SELECT Id FROM Account", useToolingApi: false};
   const b = {query: "SELECT Id FROM Contact", useToolingApi: false};
   function panel() {
@@ -329,7 +337,10 @@ test("history panel interactions", async t => {
     };
     component.state.open = true;
     component.state.selected = historyKey(a);
-    return {model, component};
+    const browser = new QueryLibraryBrowser(component.libraryProps());
+    Object.defineProperty(browser, "props", {get: () => component.libraryProps()});
+    Object.defineProperty(browser, "search", {get: () => component.search.current});
+    return {model, component, browser};
   }
   await t.test("equivalent replacement preserves selection and loads the latest original", () => {
     const {model, component} = panel();
@@ -340,6 +351,28 @@ test("history panel interactions", async t => {
     assert.deepEqual(component.selected(), latest);
     component.load(true);
     assert.deepEqual(model.loads, [{entry: latest, newTab: true}]);
+  });
+  await t.test("search resets scroll after filtering and keeps input focused for continued typing", () => {
+    const {component, browser} = panel();
+    let focused = 0;
+    const list = {scrollTop: 420, focus() { focused++; }};
+    component.search.current = {};
+    global.document = {activeElement: component.search.current};
+    browser.list = list;
+    component.state.selected = historyKey(b);
+    browser.changeSearch("中文Acc");
+    browser.changeSearch("中文Account");
+    assert.equal(component.state.search, "Account");
+    assert.equal(component.state.selected, historyKey(a));
+    assert.equal(list.scrollTop, 0);
+    assert.equal(focused, 0);
+    assert.equal(document.activeElement, component.search.current);
+    list.scrollTop = 200;
+    browser.changeSearch("Account Id");
+    assert.equal(component.state.search, "Account Id");
+    assert.equal(list.scrollTop, 0);
+    browser.changeSearch("missing");
+    component.close();
   });
   await t.test("load requires replacement confirmation, while new tab preserves edits", () => {
     let {model, component} = panel();
@@ -358,18 +391,18 @@ test("history panel interactions", async t => {
     assert.equal(model.loads.length, 0);
   });
   await t.test("arrows select without loading; Enter loads, runs and closes even with editor changes", () => {
-    let {model, component} = panel();
+    let {model, component, browser} = panel();
     const search = {dataset: {}};
     component.search.current = search;
     component.root.current = {querySelector: () => null};
     let prevented = 0;
     let event = key => ({key, target: search, preventDefault() { prevented++; }, stopPropagation() {}});
-    component.navigate(event("ArrowDown"));
+    browser.navigate(event("ArrowDown"));
     assert.equal(component.state.selected, historyKey(b));
     assert.equal(model.loads.length, 0);
-    component.navigate(event("ArrowUp"));
+    browser.navigate(event("ArrowUp"));
     assert.equal(component.state.selected, historyKey(a));
-    component.navigate(event("Enter"));
+    browser.navigate(event("Enter"));
     assert.deepEqual(model.loads, [{entry: a, newTab: false}]);
     assert.equal(model.runs, 1);
     assert.equal(component.state.open, false);
@@ -377,19 +410,19 @@ test("history panel interactions", async t => {
     assert.equal(prevented, 3);
   });
   await t.test("Enter on a row runs once; empty, busy and composing states do not run", () => {
-    let {model, component} = panel();
-    const event = {key: "Enter", target: {dataset: {historyRow: "true"}}, preventDefault() {}, stopPropagation() {}};
-    component.navigate({...event, isComposing: true});
+    let {model, component, browser} = panel();
+    const event = {key: "Enter", target: {dataset: {queryLibraryRow: "true"}}, preventDefault() {}, stopPropagation() {}};
+    browser.navigate({...event, isComposing: true});
     assert.equal(model.runs, 0);
     model.isWorking = true;
-    component.navigate(event);
+    browser.navigate(event);
     assert.equal(model.runs, 0);
     model.isWorking = false;
     component.state.search = "missing";
-    component.navigate(event);
+    browser.navigate(event);
     assert.equal(model.runs, 0);
     component.state.search = "";
-    component.navigate(event);
+    browser.navigate(event);
     assert.equal(model.runs, 1);
   });
   await t.test("candidate rendering omits empty clauses and has no Undo control", () => {
@@ -401,12 +434,14 @@ test("history panel interactions", async t => {
       if (Array.isArray(node)) { node.forEach(visit); return; }
       if (!node || typeof node !== "object") { return; }
       nodes.push(node);
+      if (typeof node.type === "function") { const Component = node.type; visit(new Component(node.props).render()); }
       visit(node.props?.children);
     }
     visit(tree);
+    assert.equal(nodes.filter(node => node.type === QueryLibraryBrowser).length, 1);
     const candidates = nodes.filter(node => node.props?.className === "history-select");
     assert.equal(candidates.length, 2);
-    assert.deepEqual(candidates[0].props.children.filter(Boolean).map(row => row.props.children), ["Id", "Account"]);
+    assert.deepEqual(candidates[0].props.children[1].props.children.props.children.filter(Boolean).map(row => row.props.children), ["Id", "Account"]);
     assert.equal(nodes.some(node => node.type === "button" && String(node.props.children).includes("Undo")), false);
   });
   await t.test("failed load keeps the panel open and does not run", () => {
@@ -445,4 +480,19 @@ test("history panel interactions", async t => {
     component.clear();
     assert.deepEqual(model.queryHistory.list, []);
   });
+});
+
+test("history ranks match quality first and usage second without mutating storage order", async () => {
+  "use strict";
+  const {filterHistory, englishSearch} = await import("../addon/query-history.js");
+  const rows = [
+    {query: "SELECT Id FROM CaseHistory", runCount: 50},
+    {query: "SELECT Name FROM Case", runCount: 2},
+    {query: "SELECT Id FROM Case", runCount: 7},
+    {query: "SELECT Id FROM BriefcaseAssignment", runCount: 100}
+  ];
+  assert.deepEqual(filterHistory(rows, "case").map(e => e.runCount), [7, 2, 50, 100]);
+  assert.deepEqual(filterHistory(rows, "").map(e => e.runCount), [100, 50, 7, 2]);
+  assert.equal(rows[0].runCount, 50);
+  assert.equal(englishSearch("中文Account Id_1 = 'Hi'，😀"), "Account Id_1 = 'Hi'");
 });

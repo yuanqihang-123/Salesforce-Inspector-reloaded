@@ -1,7 +1,8 @@
 /* global React */
 /* eslint-disable react/prop-types */
 import {querySummary, previewTokens} from "./query-history.js";
-import {buildQuery, matchingObjects, readTemplates, renderCustom, saveTemplate, deleteTemplate, parametersIn, parameterTypes, quoteText, validateTemplate, TEMPLATE_KEY} from "./query-templates.js";
+import {buildQuery, matchingObjects, readTemplates, renderCustom, saveTemplate, deleteTemplate, parametersIn, parameterTypes, quoteText, validateTemplate, TEMPLATE_KEY, TEMPLATE_USAGE_KEY} from "./query-templates.js";
+import {QueryLibraryBrowser, queryLibraryRows, queryLibraryPosition} from "./query-library-browser.js";
 const h = React.createElement;
 
 export class QueryTemplatePanel extends React.Component {
@@ -9,7 +10,7 @@ export class QueryTemplatePanel extends React.Component {
     super(props);
     this.state = {open: false, templates: [], search: "", selected: "ids", values: {}, editing: null, error: "", replace: false};
     this.outside = e => { if (this.state.open && !this.root.contains(e.target)) { this.close(); } };
-    this.storage = e => { if (this.state.open && [TEMPLATE_KEY, "queryTemplates", null].includes(e.key)) { this.refresh(); } };
+    this.storage = e => { if (this.state.open && [TEMPLATE_KEY, TEMPLATE_USAGE_KEY, "queryTemplates", null].includes(e.key)) { this.refresh(); } };
     this.resize = () => { if (this.state.open) { this.forceUpdate(); } };
   }
   componentDidMount() {
@@ -31,15 +32,35 @@ export class QueryTemplatePanel extends React.Component {
     let {model} = this.props;
     let object = querySummary(model.queryInput.value).object;
     this.refresh();
-    this.setState({open: true, search: "", selected: "ids", values: {object: object === "Query" ? "" : object, field: "", days: "7", ids: "", keyword: ""}, tooling: !!model.queryTooling, replace: false, editing: null, objectPicker: null}, () => this.search.focus());
+    this.setState({open: true, search: "", selected: "ids", values: {object: object === "Query" ? "" : object, field: "", days: "7", ids: "", keyword: ""}, tooling: !!model.queryTooling, replace: false, editing: null, objectPicker: null}, () => { const first = this.rows()[0]; if (first) { this.choose(first); } this.search.focus(); });
   }
-  rows() {
-    let words = this.state.search.toLowerCase().trim().split(/\s+/);
-    return this.state.templates.filter(t => words.every(w => `${t.name} ${t.description || ""} ${t.query || ""} ${t.kind}`.toLowerCase().includes(w)));
+  libraryProps() {
+    return {
+      items: this.state.templates,
+      search: this.state.search,
+      selected: this.state.selected,
+      itemKey: template => template.id,
+      itemTexts: template => [template.name, template.description, template.query, template.kind],
+      itemCount: template => template.runCount || 0,
+      onSearchChange: (search, callback) => this.setState({search, replace: false}, callback),
+      onSelect: (template, callback) => template ? this.choose(template, callback) : this.setState({selected: null}, callback),
+      onRun: () => this.load(false, false, true),
+      disabled: !!this.state.editing || this.state.replace,
+      inputRef: el => { this.search = el; },
+      searchLabel: "Search templates",
+      placeholder: "Search templates",
+      listLabel: "Query templates",
+      listClassName: "template-list",
+      optionClassName: "template-select",
+      bodyClassName: "template-body",
+      emptyMessage: "No matching templates",
+      renderItem: template => h("span", {}, h("strong", {}, template.name), h("small", {}, template.description || (template.kind === "builtin" ? "SOQL · Built-in" : template.kind === "starter" ? "Query starter" : template.kind === "legacy" ? "Original snippet" : template.useToolingApi ? "Tooling API" : "Custom query")))
+    };
   }
+  rows() { return queryLibraryRows(this.libraryProps()); }
   selected() { return this.rows().find(t => t.id === this.state.selected); }
-  choose(template) {
-    this.setState({selected: template.id, editing: null, replace: false, objectPicker: null, error: "", tooling: template.kind === "custom" ? !!template.useToolingApi : this.state.tooling, values: {...this.state.values, ...Object.fromEntries((template.parameters || []).map(p => [p.name, p.default || ""]))}});
+  choose(template, callback) {
+    this.setState({selected: template.id, editing: null, replace: false, objectPicker: null, error: "", tooling: template.kind === "custom" ? !!template.useToolingApi : this.state.tooling, values: {...this.state.values, ...Object.fromEntries((template.parameters || []).map(p => [p.name, p.default || ""]))}}, callback);
   }
   metadata(object, tooling) {
     let {model} = this.props;
@@ -74,7 +95,7 @@ export class QueryTemplatePanel extends React.Component {
     if (!query) { return; }
     if (!newTab && !replace && this.props.model.hasQueryEdits()) { this.setState({replace: true, runAfterLoad: run}, () => this.cancel.focus()); return; }
     try {
-      this.props.model.loadHistoryQuery({query, useToolingApi: this.state.tooling}, newTab);
+      this.props.model.loadHistoryQuery({query, useToolingApi: this.state.tooling, templateId: template.id}, newTab);
       this.setState({open: false, replace: false});
       this.props.model.queryInput.focus();
     } catch { this.setState({error: "Could not save the query tab. Please try again."}); return; }
@@ -150,14 +171,8 @@ export class QueryTemplatePanel extends React.Component {
       e.preventDefault();
       buttons[(index + (e.shiftKey ? buttons.length - 1 : 1)) % buttons.length]?.focus();
     }
-    if (!this.state.editing && !this.state.replace && ["ArrowUp", "ArrowDown"].includes(e.key) && (e.target === this.search || e.target.dataset.templateRow)) {
-      e.preventDefault();
-      let rows = this.rows();
-      let index = rows.findIndex(t => t.id === this.state.selected);
-      let next = rows[Math.max(0, Math.min(rows.length - 1, index + (e.key === "ArrowDown" ? 1 : -1)))];
-      if (next) { this.choose(next); this.setState({}, () => { let row = [...this.root.querySelectorAll("[data-template-row]")].find(el => el.dataset.templateRow === next.id); row?.scrollIntoView({block: "nearest"}); if (e.target !== this.search) { row?.focus(); } }); }
-    }
   }
+
   input(label, name, metadata, type = "text", options = null) {
     if (type === "object") { return this.objectInput(label, name, metadata); }
     let list = type === "field" ? "template-fields" : undefined;
@@ -230,51 +245,42 @@ export class QueryTemplatePanel extends React.Component {
     let metadata = open ? this.currentMetadata(template) : {objects: []};
     let preview = open ? this.preview(template, metadata) : {query: ""};
     let fields = metadata.sobjectDescribe?.fields || [];
-    let rows = this.rows();
     let rect = this.trigger?.getBoundingClientRect();
-    let width = Math.min(960, window.innerWidth - 32);
-    let top = rect ? Math.min(rect.bottom + 6, Math.max(16, window.innerHeight - 250)) : 60;
     return h("div", {className: "history-container", ref: el => { this.root = el; }, onKeyDown: e => this.navigate(e)},
-      h("button", {ref: el => { this.trigger = el; }, "aria-expanded": open, "aria-controls": "query-template-panel", onClick: () => this.toggle()}, "Templates"),
-      open && h("section", {id: "query-template-panel", className: "history-panel template-panel", "aria-label": "Query templates", style: {left: Math.max(16, Math.min(window.innerWidth - width - 16, rect?.left || 16)), top, maxHeight: Math.min(window.innerHeight * 0.8, window.innerHeight - top - 16)}},
-        h("div", {className: "history-toolbar"},
-          h("input", {type: "search", ref: el => { this.search = el; }, "aria-label": "Search templates", placeholder: "Search templates", value: this.state.search, disabled: !!editing, onChange: e => this.setState({search: e.target.value, replace: false}, () => { if (!this.selected() && this.rows()[0]) { this.choose(this.rows()[0]); } })}),
-          h("button", {onClick: () => this.create()}, "From current query"),
-          h("button", {"aria-label": "Close templates", onClick: () => this.close()}, "×")
-        ),
+      h("button", {className: "query-library-button", ref: el => { this.trigger = el; }, "aria-expanded": open, "aria-controls": "query-template-panel", onClick: () => this.toggle()},
+        h("svg", {viewBox: "0 0 24 24", "aria-hidden": "true"}, h("path", {d: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"})),
+        "Templates"
+      ),
+      open && h("section", {id: "query-template-panel", className: "history-panel template-panel", "aria-label": "Query templates", style: queryLibraryPosition(rect, window, 0.8)},
         h("datalist", {id: "template-fields"}, fields.map(f => h("option", {key: f.name, value: f.name}, f.label))),
-        editing ? this.renderEditor() : h("div", {className: "history-body template-body"},
-          h("div", {className: "history-list template-list"},
-            !rows.length && h("p", {}, "No matching templates"),
-            ["builtin", "starter", "custom", "legacy"].map(kind => h("div", {key: kind},
-              rows.some(t => t.kind === kind) && h("h3", {}, {builtin: "SOQL · Built-in", starter: "SOSL / GraphQL", custom: "My templates", legacy: "Legacy snippets"}[kind]),
-              rows.filter(t => t.kind === kind).map(t => h("div", {key: t.id, className: "history-row" + (this.state.selected === t.id ? " selected" : "")},
-                h("button", {className: "history-select template-select", "data-template-row": t.id, "aria-pressed": this.state.selected === t.id, onClick: () => this.choose(t)}, h("strong", {}, t.name), h("small", {}, t.description || (t.kind === "starter" ? "Query starter" : t.kind === "legacy" ? "Original snippet" : t.useToolingApi ? "Tooling API" : "Custom query")))
-              ))
-            ))
+        h(QueryLibraryBrowser, {...this.libraryProps(),
+          editor: editing ? this.renderEditor() : null,
+          toolbar: h("div", {className: "query-library-toolbar-actions"},
+            h("button", {onClick: () => this.create()}, "From current query"),
+            h("button", {"aria-label": "Close templates", onClick: () => this.close()}, "×")
+          )},
+        h("div", {className: "history-preview template-preview"},
+          h("div", {className: "template-parameters"},
+            template?.kind === "builtin" && this.input("Object", "object", metadata, "object"),
+            template?.kind === "builtin" && ["search", "group", "duplicates"].includes(template.id) && this.input("Field", "field", metadata, "field", fields.filter(f => template.id === "search" ? f.filterable && ["string", "textarea", "email", "phone", "url"].includes(f.type) : f.groupable && (template.id !== "duplicates" || f.filterable))),
+            template?.id === "ids" && this.input("Record IDs", "ids", metadata),
+            ["created", "modified"].includes(template?.id) && this.input("Last N days (includes today)", "days", metadata, "number"),
+            template?.id === "search" && this.input("Keyword", "keyword", metadata),
+            template?.kind === "custom" && template.parameters.map(p => this.input(p.name, p.name, metadata, p.type)),
+            ["legacy", "starter"].includes(template?.kind) && h("p", {}, "Query snippet: edit it after loading, or convert it to a parameterized template."),
+            template?.kind !== "custom" && h("label", {}, h("input", {type: "checkbox", checked: !!this.state.tooling, onChange: e => this.setState({tooling: e.target.checked, values: {...values, field: ""}, replace: false})}), " Tooling API"),
+            ["loadfailed", "notfound"].includes(metadata.sobjectStatus) && h("p", {role: "status"}, metadata.sobjectStatus === "notfound" ? "Object not found in this API." : "Could not load object metadata. Reopen Data Export to retry."),
+            preview.message && h("p", {role: "status"}, preview.message)
           ),
-          h("div", {className: "history-preview template-preview"},
-            h("div", {className: "template-parameters"},
-              template?.kind === "builtin" && this.input("Object", "object", metadata, "object"),
-              template?.kind === "builtin" && ["search", "group", "duplicates"].includes(template.id) && this.input("Field", "field", metadata, "field", fields.filter(f => template.id === "search" ? f.filterable && ["string", "textarea", "email", "phone", "url"].includes(f.type) : f.groupable && (template.id !== "duplicates" || f.filterable))),
-              template?.id === "ids" && this.input("Record IDs", "ids", metadata),
-              ["created", "modified"].includes(template?.id) && this.input("Last N days (includes today)", "days", metadata, "number"),
-              template?.id === "search" && this.input("Keyword", "keyword", metadata),
-              template?.kind === "custom" && template.parameters.map(p => this.input(p.name, p.name, metadata, p.type)),
-              ["legacy", "starter"].includes(template?.kind) && h("p", {}, "Query snippet: edit it after loading, or convert it to a parameterized template."),
-              template?.kind !== "custom" && h("label", {}, h("input", {type: "checkbox", checked: !!this.state.tooling, onChange: e => this.setState({tooling: e.target.checked, values: {...values, field: ""}, replace: false})}), " Tooling API"),
-              ["loadfailed", "notfound"].includes(metadata.sobjectStatus) && h("p", {role: "status"}, metadata.sobjectStatus === "notfound" ? "Object not found in this API." : "Could not load object metadata. Reopen Data Export to retry."),
-              preview.message && h("p", {role: "status"}, preview.message)
-            ),
-            h("pre", {tabIndex: 0, "aria-label": "Generated query preview"}, previewTokens(preview.query).map((token, i) => h("span", {key: i, className: token.kind ? `history-${token.kind}` : ""}, token.text))),
-            h("div", {className: "history-actions"},
-              h("button", {ref: el => { this.loadButton = el; }, disabled: !preview.query || this.props.model.isWorking, onClick: () => this.load(false)}, "Load query"),
-              h("button", {disabled: !preview.query || this.props.model.isWorking, onClick: () => this.load(true)}, "Open in new tab"),
-              template && template.kind !== "builtin" && h("button", {onClick: () => this.create(template)}, template.kind === "custom" ? "Edit template" : "Convert to template"),
-              template?.kind === "custom" && h("button", {onClick: () => this.remove(template)}, "Delete template"),
-              this.props.model.isWorking && h("small", {}, "Wait for the current export to finish")
-            )
+          h("pre", {tabIndex: 0, "aria-label": "Generated query preview"}, previewTokens(preview.query).map((token, i) => h("span", {key: i, className: token.kind ? `history-${token.kind}` : ""}, token.text))),
+          h("div", {className: "history-actions"},
+            h("button", {ref: el => { this.loadButton = el; }, disabled: !preview.query || this.props.model.isWorking, onClick: () => this.load(false)}, "Load query"),
+            h("button", {disabled: !preview.query || this.props.model.isWorking, onClick: () => this.load(true)}, "Open in new tab"),
+            template && template.kind !== "builtin" && h("button", {onClick: () => this.create(template)}, template.kind === "custom" ? "Edit template" : "Convert to template"),
+            template?.kind === "custom" && h("button", {onClick: () => this.remove(template)}, "Delete template"),
+            this.props.model.isWorking && h("small", {}, "Wait for the current export to finish")
           )
+        )
         ),
         replace && h("div", {className: "history-confirm", role: "dialog", "aria-label": "Replace the current query?"}, h("p", {}, "Replace the current query? Your edits will be overwritten."),
           h("button", {ref: el => { this.cancel = el; }, onClick: () => this.setState({replace: false}, () => this.loadButton.focus())}, "Cancel"),

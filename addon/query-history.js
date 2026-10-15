@@ -154,11 +154,15 @@ export class QueryHistory {
     if (this.storageKey === "insextQueryHistory") {
       // Existing history is newest-first. Collapse legacy duplicates on read;
       // the next successful save persists the compacted list.
-      const seen = new Set();
+      const seen = new Map();
       history = history.filter(entry => {
         const key = historyKey(entry);
-        if (seen.has(key)) { return false; }
-        seen.add(key);
+        if (seen.has(key)) {
+          const newest = seen.get(key);
+          newest.runCount = executionCount(newest) + executionCount(entry);
+          return false;
+        }
+        seen.set(key, entry);
         return true;
       });
     }
@@ -184,7 +188,12 @@ export class QueryHistory {
       entry = {...entry, query: compactQueryWhitespace(entry.query)};
     }
     const key = this._key(entry);
-    let history = this._get().filter(e => this._key(e) !== key);
+    let previous = this._get();
+    if (this.storageKey === "insextQueryHistory") {
+      let existing = previous.find(e => this._key(e) === key);
+      entry = {...entry, runCount: (existing ? executionCount(existing) : 0) + 1};
+    }
+    let history = previous.filter(e => this._key(e) !== key);
     history.unshift(entry);
     this.write(history.slice(0, this.max));
   }
@@ -203,8 +212,7 @@ export class QueryHistory {
 }
 
 export function filterHistory(list, search) {
-  let terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return list.filter(e => terms.every(term => e.query.toLowerCase().includes(term)));
+  return rankQueryOptions(list, search, e => [querySummary(e.query).object, e.query], executionCount);
 }
 
 // Tokenize quoted strings and comments before inspecting or formatting clauses.
@@ -275,4 +283,27 @@ export function previewTokens(query) {
 
 export function queryBaseline(query, tooling, all) {
   return JSON.stringify([query, !!tooling, !!all]);
+}
+
+// Legacy history records represent at least one successful execution.
+export function executionCount(entry) {
+  return Number.isSafeInteger(entry.runCount) && entry.runCount >= 0 ? entry.runCount : 1;
+}
+
+export function englishSearch(value) {
+  return value.replace(/[^\x20-\x7e]/g, "");
+}
+
+// Exact matches precede prefixes, whole words, then substrings. Usage breaks ties.
+export function rankQueryOptions(list, search, texts, count) {
+  const phrase = search.trim().toLowerCase();
+  const terms = phrase.split(/\s+/).filter(Boolean);
+  const rank = text => text === phrase ? 0 : text.startsWith(phrase) ? 1
+    : terms.every(term => text.split(/[^a-z0-9_]+/).includes(term)) ? 2 : 3;
+  return list.map(entry => {
+    const fields = texts(entry).map(text => String(text || "").toLowerCase());
+    return {entry, fields, rank: phrase ? Math.min(...fields.map(rank)) : 0};
+  }).filter(item => terms.every(term => item.fields.some(text => text.includes(term))))
+    .sort((a, b) => a.rank - b.rank || count(b.entry) - count(a.entry))
+    .map(item => item.entry);
 }

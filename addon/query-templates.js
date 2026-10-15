@@ -1,5 +1,6 @@
 // Templates hold query patterns; query history holds successful executions.
 export const TEMPLATE_KEY = "queryTemplatesV2";
+export const TEMPLATE_USAGE_KEY = "queryTemplateRunCounts";
 export const parameterTypes = ["text", "number", "date", "object", "field"];
 export const builtInTemplates = [
   {id: "ids", name: "Find records by ID", description: "Look up one or more record IDs", kind: "builtin"},
@@ -126,7 +127,8 @@ export function readTemplates(storage = localStorage) {
     try { validateTemplate(t); return typeof t.id === "string" && Array.isArray(t.parameters); } catch { return false; }
   }).map(t => ({...t, kind: "custom"}));
   let legacy = (storage.getItem("queryTemplates") || "").split("//").filter(q => q.trim()).map((query, i) => ({id: `legacy-${i}`, name: `Legacy: ${query.trim().slice(0, 55)}`, query, parameters: [], kind: "legacy"}));
-  return [...builtInTemplates, ...starterTemplates, ...custom, ...legacy];
+  const usage = JSON.parse(storage.getItem(TEMPLATE_USAGE_KEY) || "{}");
+  return [...builtInTemplates, ...starterTemplates, ...custom, ...legacy].map(t => ({...t, runCount: templateRunCount(usage?.[t.id])}));
 }
 export function saveTemplate(template, storage = localStorage) {
   validateTemplate(template);
@@ -137,4 +139,13 @@ export function saveTemplate(template, storage = localStorage) {
 export function deleteTemplate(id, storage = localStorage) {
   let custom = readTemplates(storage).filter(t => t.kind === "custom" && t.id !== id);
   storage.setItem(TEMPLATE_KEY, JSON.stringify(custom));
+}
+
+function templateRunCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+export function recordTemplateRun(id, storage = localStorage) {
+  const usage = JSON.parse(storage.getItem(TEMPLATE_USAGE_KEY) || "{}");
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) { throw new Error("Invalid template usage data."); }
+  storage.setItem(TEMPLATE_USAGE_KEY, JSON.stringify({...usage, [id]: templateRunCount(usage[id]) + 1}));
 }
