@@ -420,22 +420,72 @@ test("history panel interactions", async t => {
     browser.changeSearch("missing");
     component.close();
   });
-  await t.test("load requires replacement confirmation, while new tab preserves edits", () => {
-    let {model, component} = panel();
-    component.load(false);
-    assert.equal(component.state.replace, true);
-    assert.equal(model.loads.length, 0);
-    component.load(true);
-    assert.deepEqual(model.loads, [{entry: a, newTab: true}]);
-    assert.equal(component.state.open, false);
+  function actionButton(component, label) {
+    global.window = {innerWidth: 1280, innerHeight: 900};
+    function find(node) {
+      if (Array.isArray(node)) { return node.map(find).find(Boolean); }
+      if (!node || typeof node !== "object") { return null; }
+      return node.type === "button" && node.props.children === label ? node : find(node.props?.children);
+    }
+    return find(component.render());
+  }
+  await t.test("history actions match Enter exactly except for the new tab target and never confirm replacement", () => {
+    const results = [];
+    for (const action of ["Enter", "Load query", "Open in new tab"]) {
+      const {model, component, browser} = panel();
+      const calls = [];
+      model.hasQueryEdits = () => { throw new Error("History must overwrite directly"); };
+      model.loadHistoryQuery = (entry, newTab) => calls.push({entry, newTab});
+      model.queryInput.focus = () => calls.push("focus");
+      model.doExport = () => calls.push("run");
+      model.didUpdate = () => calls.push("update");
+      component.state.search = "account";
+      if (action === "Enter") {
+        component.search.current = {};
+        browser.navigate({key: "Enter", target: component.search.current, preventDefault() {}, stopPropagation() {}});
+      } else {
+        actionButton(component, action).props.onClick();
+      }
+      assert.deepEqual(calls, [{entry: a, newTab: action === "Open in new tab"}, "focus", "run", "update"]);
+      assert.equal(component.state.error, "");
+      results.push({calls: calls.slice(1), state: {...component.state}});
+    }
+    assert.deepEqual(results[1], results[0]);
+    assert.deepEqual(results[2], results[0]);
   });
-  await t.test("exporting blocks both loading actions even after confirmation", () => {
-    let {model, component} = panel();
-    model.isWorking = true;
-    component.load(false, true);
-    component.load(true);
-    assert.equal(model.loads.length, 0);
-  });
+  for (const [label, newTab] of [["Load query", false], ["Open in new tab", true]]) {
+    await t.test(`${label} loads and runs once, closes and focuses the editor even with edits`, () => {
+      const {model, component} = panel();
+      const actions = [];
+      model.queryInput.focus = () => actions.push("focus");
+      model.loadHistoryQuery = (entry, target) => actions.push({entry, newTab: target});
+      model.doExport = () => actions.push("run");
+      actionButton(component, label).props.onClick();
+      assert.deepEqual(actions, [{entry: a, newTab}, "focus", "run"]);
+      assert.equal(component.state.open, false);
+    });
+    await t.test(`${label} is disabled and does not load or run when busy or empty`, () => {
+      for (const busy of [true, false]) {
+        const {model, component} = panel();
+        model.isWorking = busy;
+        if (!busy) { component.state.search = "missing"; }
+        const button = actionButton(component, label);
+        assert.equal(button.props.disabled, true);
+        button.props.onClick();
+        assert.equal(model.loads.length, 0);
+        assert.equal(model.runs, 0);
+        assert.equal(component.state.open, true);
+      }
+    });
+    await t.test(`${label} keeps the panel open and does not run when loading fails`, () => {
+      const {model, component} = panel();
+      model.loadHistoryQuery = () => { throw new Error("quota"); };
+      actionButton(component, label).props.onClick();
+      assert.equal(model.runs, 0);
+      assert.equal(component.state.open, true);
+      assert.ok(component.state.error);
+    });
+  }
   await t.test("arrows select without loading; Enter loads, runs and closes even with editor changes", () => {
     let {model, component, browser} = panel();
     const search = {dataset: {}};
@@ -452,7 +502,6 @@ test("history panel interactions", async t => {
     assert.deepEqual(model.loads, [{entry: a, newTab: false}]);
     assert.equal(model.runs, 1);
     assert.equal(component.state.open, false);
-    assert.equal(component.state.replace, false);
     assert.equal(prevented, 3);
   });
   await t.test("Enter on a row runs once; empty, busy and composing states do not run", () => {
@@ -489,14 +538,6 @@ test("history panel interactions", async t => {
     assert.equal(candidates.length, 2);
     assert.deepEqual(candidates[0].props.children[1].props.children.props.children.filter(Boolean).map(row => row.props.children), ["Id", "Account"]);
     assert.equal(nodes.some(node => node.type === "button" && String(node.props.children).includes("Undo")), false);
-  });
-  await t.test("failed load keeps the panel open and does not run", () => {
-    let {model, component} = panel();
-    model.loadHistoryQuery = () => { throw new Error("quota"); };
-    component.load(false, true, true);
-    assert.equal(model.runs, 0);
-    assert.equal(component.state.open, true);
-    assert.ok(component.state.error);
   });
   await t.test("deletion updates selection and preview before lifecycle reconciliation", () => {
     const c = {query: "SELECT Name FROM Account", useToolingApi: false};

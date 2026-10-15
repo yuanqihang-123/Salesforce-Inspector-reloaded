@@ -14,7 +14,7 @@ function executionTime(entry) {
 export class QueryHistoryPanel extends React.Component {
   constructor(props) {
     super(props);
-    this.state = {open: false, search: "", selected: null, more: false, replace: false, error: ""};
+    this.state = {open: false, search: "", selected: null, more: false, error: ""};
     this.root = {current: null};
     this.trigger = {current: null};
     this.search = {current: null};
@@ -40,7 +40,7 @@ export class QueryHistoryPanel extends React.Component {
   }
   componentDidUpdate() {
     if (this.state.open && !this.selected() && this.rows().length) {
-      this.setState({selected: historyKey(this.rows()[0]), replace: false});
+      this.setState({selected: historyKey(this.rows()[0])});
     }
   }
   libraryProps() {
@@ -52,11 +52,11 @@ export class QueryHistoryPanel extends React.Component {
       itemTexts: historySearchTexts,
       prioritizeMatches: true,
       itemCount: executionCount,
-      onSearchChange: (search, callback) => this.setState({search, replace: false}, callback),
-      onSelect: (entry, callback) => this.setState({selected: entry ? historyKey(entry) : null, replace: false}, callback),
-      onRun: () => this.load(false, true, true),
+      onSearchChange: (search, callback) => this.setState({search}, callback),
+      onSelect: (entry, callback) => this.setState({selected: entry ? historyKey(entry) : null}, callback),
+      onRun: () => this.load(false),
       onDelete: entry => this.delete(entry),
-      disabled: this.state.replace || this.state.more,
+      disabled: this.state.more,
       inputRef: el => { this.search.current = el; },
       searchLabel: "Search query history",
       placeholder: "Search objects, fields or query text",
@@ -85,7 +85,7 @@ export class QueryHistoryPanel extends React.Component {
     this.props.model.didUpdate();
   }
   close() {
-    this.setState({open: false, more: false, replace: false}, () => this.trigger.current?.focus());
+    this.setState({open: false, more: false}, () => this.trigger.current?.focus());
   }
   toggle() {
     if (this.state.open) { this.close(); return; }
@@ -100,32 +100,23 @@ export class QueryHistoryPanel extends React.Component {
     });
   }
   navigate(e) {
-    if (this.state.replace && e.key === "Tab") {
-      let buttons = [...this.root.current.querySelectorAll(".history-confirm button:not(:disabled)")];
-      let index = buttons.indexOf(document.activeElement);
-      e.preventDefault();
-      buttons[(index + (e.shiftKey ? buttons.length - 1 : 1)) % buttons.length]?.focus();
-    }
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      if (this.state.replace) { this.setState({replace: false}, () => this.loadButton?.focus()); } else if (this.state.more) { this.setState({more: false}, () => this.moreButton?.focus()); } else { this.close(); }
+      if (this.state.more) { this.setState({more: false}, () => this.moreButton?.focus()); } else { this.close(); }
     }
   }
 
-  load(newTab, replace = false, run = false) {
+  load(newTab) {
     let entry = this.selected();
     let {model} = this.props;
     if (!entry || model.isWorking) { return; }
-    if (!newTab && !replace && model.hasQueryEdits()) {
-      this.setState({replace: true}, () => this.cancelButton?.focus());
-      return;
-    }
     try {
       model.loadHistoryQuery(entry, newTab);
-      this.setState({open: false, replace: false, more: false});
+      this.setState({open: false, more: false});
       model.queryInput.focus();
-      if (run) { model.doExport(); model.didUpdate(); }
+      model.doExport();
+      model.didUpdate();
     } catch {
       this.setState({error: "Could not save the query tab. Please try again."});
     }
@@ -139,7 +130,7 @@ export class QueryHistoryPanel extends React.Component {
       let removed = this.props.model.queryHistory.remove(entry);
       if (!removed) { this.refresh(); return; }
       // Update selection before componentDidUpdate can fall back to the first row.
-      this.setState({error: "", replace: false, selected}, () => {
+      this.setState({error: "", selected}, () => {
         this.props.model.didUpdate();
         let row = this.root.current?.querySelector('[data-selected="true"]');
         (row || this.search.current)?.focus();
@@ -152,7 +143,7 @@ export class QueryHistoryPanel extends React.Component {
     if (!window.confirm("Clear all query history, including queries hidden by the search? This cannot be undone.")) { return; }
     try {
       this.props.model.queryHistory.clear();
-      this.setState({selected: null, more: false, replace: false, error: ""});
+      this.setState({selected: null, more: false, error: ""});
       this.props.model.didUpdate();
       this.search.current?.focus();
     } catch {
@@ -161,7 +152,7 @@ export class QueryHistoryPanel extends React.Component {
   }
   render() {
     let {model} = this.props;
-    let {open, more, replace, error} = this.state;
+    let {open, more, error} = this.state;
     error = error || model.historyError;
     let rows = this.rows();
     let entry = this.selected();
@@ -184,17 +175,11 @@ export class QueryHistoryPanel extends React.Component {
         h("div", {className: "history-preview", "aria-label": "Full query preview"},
           h("pre", {tabIndex: 0}, entry ? previewTokens(entry.query).map((token, i) => h("span", {key: i, className: token.kind ? `history-${token.kind}` : ""}, token.text)) : "Select a query to preview"),
           h("div", {className: "history-actions"},
-            h("button", {ref: el => { this.loadButton = el; }, disabled: !entry || model.isWorking, onClick: () => this.load(false)}, "Load query"),
+            h("button", {disabled: !entry || model.isWorking, onClick: () => this.load(false)}, "Load query"),
             h("button", {disabled: !entry || model.isWorking, onClick: () => this.load(true)}, "Open in new tab"),
             model.isWorking && h("small", {}, "Wait for the current export to finish")
           )
         )
-        ),
-        replace && h("div", {className: "history-confirm", role: "dialog", "aria-label": "Replace the current query?"},
-          h("p", {}, "Replace the current query? Your edits will be overwritten."),
-          h("button", {ref: el => { this.cancelButton = el; }, onClick: () => this.setState({replace: false}, () => this.loadButton?.focus())}, "Cancel"),
-          h("button", {disabled: model.isWorking, onClick: () => this.load(true)}, "Open in new tab"),
-          h("button", {disabled: model.isWorking, onClick: () => this.load(false, true)}, "Replace")
         )
       ),
       error && h("div", {className: "history-notice"},
