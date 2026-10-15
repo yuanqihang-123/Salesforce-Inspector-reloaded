@@ -612,7 +612,8 @@ test("history ranks match location first and usage second without mutating stora
     {query: "SELECT Id FROM BriefcaseAssignment", runCount: 100}
   ];
   assert.deepEqual(filterHistory(rows, "case").map(e => e.runCount), [100, 50, 7, 2]);
-  assert.deepEqual(filterHistory(rows, "").map(e => e.runCount), [100, 50, 7, 2]);
+  assert.deepEqual(filterHistory(rows, ""), rows);
+  assert.deepEqual(filterHistory(rows, "   "), rows);
   assert.equal(rows[0].runCount, 50);
   assert.equal(englishSearch("中文Account Id_1 = 'Hi'，😀"), "Account Id_1 = 'Hi'");
 });
@@ -637,8 +638,11 @@ test("history prioritizes objects, selected fields, WHERE fields and other text"
   assert.deepEqual(filterHistory(rows, "needle account"), [rows[5], rows[0], rows[1], rows[4], rows[2]]);
   assert.deepEqual(filterHistory(rows, "absent"), []);
   const panel = new QueryHistoryPanel({model: {queryHistory: {list: rows}}});
+  assert.deepEqual(panel.rows(), rows);
   panel.state.search = "needle";
   assert.deepEqual(panel.rows(), expected);
+  panel.state.search = "";
+  assert.deepEqual(panel.rows(), rows);
   const query = "SELECT COUNT(Id) Needle, (SELECT Account.Name FROM Contacts WHERE DAY_ONLY(CreatedDate) > 2026-01-01) FROM Account WHERE (Name = 'Needle' OR Owner.Name = 'from where') AND Id IN (SELECT AccountId FROM Opportunity WHERE StageName = 'Needle') ORDER BY Needle__c /* Needle */";
   const [objects, fields, whereFields] = historySearchTexts({query});
   assert.equal(objects, "Contacts Account Opportunity");

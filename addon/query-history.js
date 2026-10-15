@@ -341,6 +341,8 @@ export function englishSearch(value) {
 // Filter every term anywhere; optional ordered text categories precede usage.
 export function rankQueryOptions(list, search, texts, count, prioritizeMatches = false) {
   const phrase = search.trim().toLowerCase();
+  // History is stored newest-first; only rank it when there is a search.
+  if (prioritizeMatches && !phrase) { return list.slice(); }
   const terms = phrase.split(/\s+/).filter(Boolean);
   return list.map(entry => {
     const fields = texts(entry).map(text => String(text || "").toLowerCase());
