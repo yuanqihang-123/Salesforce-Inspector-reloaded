@@ -26,6 +26,20 @@ test("built-in patterns validate metadata and input", async t => {
     assert.match(buildQuery("group", {...values, field: "Industry"}, describe), /SELECT Industry, COUNT\(Id\) recordCount[\s\S]*GROUP BY Industry[\s\S]*ORDER BY COUNT\(Id\) DESC/);
     assert.match(buildQuery("duplicates", values, describe), /WHERE Name != null[\s\S]*HAVING COUNT\(Id\) > 1/);
   });
+  await t.test("ID lists accept quotes and array brackets while preserving validation and deduplication", () => {
+    const ids = ["0058500000789dBAAQ", "00585000007940oAAA", "00585000007BGv7AAG"];
+    const userDescribe = {...describe, name: "User"};
+    const query = input => buildQuery("ids", {object: "User", ids: input}, userDescribe);
+    const expected = "SELECT Id, Name\nFROM User\nWHERE Id IN ('0058500000789dBAAQ', '00585000007940oAAA', '00585000007BGv7AAG')";
+    for (const input of [ids.map(id => `"${id}"`).join(",\n  "), JSON.stringify(ids, null, 2), ids.map(id => `'${id}'`).join(", "), ids.join("; ")]) {
+      assert.equal(query(input), expected);
+    }
+    assert.equal(query(`["${ids[0]}", "${ids[0]}"]`), `SELECT Id, Name\nFROM User\nWHERE Id = '${ids[0]}'`);
+    assert.equal(query('"0058500000789dB"'), "SELECT Id, Name\nFROM User\nWHERE Id = '0058500000789dB'");
+    for (const input of ["", "[]", '[""]', '["invalid"]', `["${ids[0]}"`, `"${ids[0]}'`, `[["${ids[0]}"]]`, `"${ids[0]}" OR Id != null`]) {
+      assert.throws(() => query(input), /Enter Salesforce IDs/);
+    }
+  });
   await t.test("literal escaping and wildcard input cannot change the query structure", () => {
     assert.equal(quoteText("O'Brien\\Co\n"), "'O\\'Brien\\\\Co\\n'");
     assert.match(buildQuery("search", {...values, keyword: "O'Brien_%"}, describe), /O\\'Brien\\_\\%/);

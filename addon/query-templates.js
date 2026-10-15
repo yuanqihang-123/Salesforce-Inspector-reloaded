@@ -96,8 +96,10 @@ export function buildQuery(id, values, describe) {
   if (nameField && nameField.name !== "Id") { columns.push(nameField.name); }
   let suffix;
   if (id === "ids") {
-    let ids = [...new Set(String(values.ids || "").split(/[\s,;]+/).filter(Boolean))];
-    if (!ids.length || ids.some(value => !/^(?:[A-Za-z0-9]{15}|[A-Za-z0-9]{18})$/.test(value))) { throw new Error("Enter Salesforce IDs of 15 or 18 characters, separated by commas or new lines."); }
+    let input = String(values.ids || "").trim();
+    if (input.startsWith("[") && input.endsWith("]")) { input = input.slice(1, -1); }
+    let ids = [...new Set(input.split(/[\s,;]+/).filter(Boolean).map(value => value.replace(/^(["'])(.*)\1$/, "$2")))];
+    if (!ids.length || ids.some(value => !/^(?:[A-Za-z0-9]{15}|[A-Za-z0-9]{18})$/.test(value))) { throw new Error("Enter Salesforce IDs of 15 or 18 characters, separated by commas or new lines. Quoted IDs and arrays are also supported."); }
     suffix = ids.length === 1 ? `WHERE Id = ${quoteText(ids[0])}` : `WHERE Id IN (${ids.map(quoteText).join(", ")})`;
   } else if (id === "created" || id === "modified") {
     let dateField = field(id === "created" ? "CreatedDate" : "LastModifiedDate");
