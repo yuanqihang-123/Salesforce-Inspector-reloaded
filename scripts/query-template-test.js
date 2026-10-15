@@ -97,7 +97,7 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
     panel.state = {...panel.state, open: true, templates: api.builtInTemplates, selected: "created", tooling: false, values: {...values}};
     return {panel, model, loads};
   }
-  await t.test("search ranks globally and scrolls to the first option without taking input focus", () => {
+  await t.test("search filters globally by words and sorts only by usage without taking input focus", () => {
     const {panel: p} = panel();
     const browser = new QueryLibraryBrowser(p.libraryProps());
     Object.defineProperty(browser, "props", {get: () => p.libraryProps()});
@@ -115,8 +115,8 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
     browser.list = list;
     browser.changeSearch("中文Case");
     assert.equal(p.state.search, "Case");
-    assert.deepEqual(p.rows().map(t => t.id), ["popular", "exact", "prefix"]);
-    assert.equal(p.state.selected, "popular");
+    assert.deepEqual(p.rows().map(t => t.id), ["prefix", "popular", "exact"]);
+    assert.equal(p.state.selected, "prefix");
     assert.equal(list.scrollTop, 0);
     assert.equal(focused, 0);
     assert.equal(document.activeElement, p.search);

@@ -951,7 +951,7 @@ svg.icon:hover {
 .history-list { flex: 0 0 55%; overflow: auto; border-right: 1px solid #dddbda; }
 .history-list > p, .history-list > button { margin: 12px; }
 .history-row { display: flex; border-bottom: 1px solid #eee; align-items: flex-start; }
-.history-row.selected { background: #eef4ff; }
+.history-row.selected, .history-row:hover, .history-row:focus-within { background: #eef4ff; }
 .history-select { flex: 1; min-width: 0; padding: 0 0 0 12px; border: 0; background: transparent; color: inherit; text-align: left; height: auto; white-space: normal; }
 .history-select strong, .history-select small { display: block; }
 .history-summary { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 4px 0; font-family: monospace; font-size: 12px; line-height: 1.5; }
@@ -975,7 +975,7 @@ svg.icon:hover {
   .history-preview { min-height: 0; }
 }
 .history-select { line-height: 1.4; }
-.history-select:hover, .history-select:focus { background: #eef4ff; color: inherit; border: 0; }
+.history-select:hover, .history-select:focus { background: transparent; color: inherit; border: 0; }
 .history-confirm { flex-shrink: 0; }
 
 /* Query templates share the history panel's placement and focus conventions. */

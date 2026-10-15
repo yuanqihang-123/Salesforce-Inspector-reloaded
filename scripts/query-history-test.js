@@ -342,6 +342,52 @@ test("history panel interactions", async t => {
     Object.defineProperty(browser, "search", {get: () => component.search.current});
     return {model, component, browser};
   }
+  await t.test("reopening after Enter preserves search, filtered options and selection", () => {
+    const {model, component, browser} = panel();
+    const c = {query: "SELECT Name FROM Account", useToolingApi: false};
+    model.queryHistory.add(c);
+    browser.changeSearch("account");
+    browser.props.onSelect(a);
+    const rows = component.rows();
+    browser.navigate({key: "Enter", target: component.search.current, preventDefault() {}, stopPropagation() {}});
+    assert.equal(model.runs, 1);
+    assert.equal(component.state.open, false);
+    let focused = false;
+    let selection = [0, 0];
+    component.search.current = {
+      value: component.state.search,
+      focus() { focused = true; selection = [0, this.value.length]; },
+      setSelectionRange(start, end) { selection = [start, end]; }
+    };
+    component.toggle();
+    assert.equal(component.state.open, true);
+    assert.equal(component.state.search, "account");
+    assert.deepEqual(component.rows(), rows);
+    assert.equal(component.state.selected, historyKey(a));
+    assert.deepEqual(component.selected(), a);
+    assert.equal(focused, true);
+    assert.deepEqual(selection, ["account".length, "account".length]);
+  });
+  await t.test("reopening refreshes history and falls back within the saved filter", () => {
+    const {model, component, browser} = panel();
+    const c = {query: "SELECT Name FROM Account", useToolingApi: false};
+    model.queryHistory.add(c);
+    browser.changeSearch("account");
+    browser.props.onSelect(a);
+    component.close();
+    model.queryHistory.storage.setItem("history", JSON.stringify([b, c]));
+    component.toggle();
+    assert.equal(component.state.search, "account");
+    assert.deepEqual(component.rows(), [c]);
+    assert.deepEqual(component.selected(), c);
+    component.close();
+    model.queryHistory.storage.setItem("history", JSON.stringify([b]));
+    component.toggle();
+    assert.equal(component.state.search, "account");
+    assert.deepEqual(component.rows(), []);
+    assert.equal(component.state.selected, null);
+    assert.equal(component.selected(), undefined);
+  });
   await t.test("equivalent replacement preserves selection and loads the latest original", () => {
     const {model, component} = panel();
     const latest = {query: " select id from account ", useToolingApi: false, lastExecutedAt: 50};
@@ -452,6 +498,80 @@ test("history panel interactions", async t => {
     assert.equal(component.state.open, true);
     assert.ok(component.state.error);
   });
+  await t.test("deletion updates selection and preview before lifecycle reconciliation", () => {
+    const c = {query: "SELECT Name FROM Account", useToolingApi: false};
+    const d = {query: "SELECT Email__c FROM Account", useToolingApi: false};
+    for (const scenario of [
+      {items: [a, c, d], selected: c, deleted: c, expected: d},
+      {items: [a, c, d], selected: d, deleted: d, expected: c},
+      {items: [a], selected: a, deleted: a, expected: null},
+      {items: [a, c, d], selected: c, deleted: a, expected: c},
+      {items: [a, b, c, d], search: "account", selected: c, deleted: c, expected: d}
+    ]) {
+      const {model, component, browser} = panel();
+      model.queryHistory = new QueryHistory("history", 100, memoryStorage(JSON.stringify(scenario.items)));
+      component.state.search = scenario.search || "";
+      component.state.selected = historyKey(scenario.selected);
+      component.setState = (next, callback) => {
+        Object.assign(component.state, typeof next === "function" ? next(component.state) : next);
+        component.componentDidUpdate();
+        callback?.();
+      };
+      let focusedSelection;
+      const focus = () => { focusedSelection = component.state.selected; };
+      component.root.current = {querySelector: () => component.selected() ? {focus} : null};
+      component.search.current = {focus};
+      component.delete(scenario.deleted);
+      const expectedKey = scenario.expected ? historyKey(scenario.expected) : null;
+      assert.equal(component.state.selected, expectedKey);
+      assert.equal(focusedSelection, expectedKey);
+      assert.deepEqual(component.selected(), scenario.expected || undefined);
+      const nodes = [];
+      function visit(node) {
+        if (Array.isArray(node)) { node.forEach(visit); return; }
+        if (!node || typeof node !== "object") { return; }
+        nodes.push(node);
+        visit(node.props?.children);
+      }
+      global.window = {innerWidth: 1280, innerHeight: 900};
+      visit(component.render());
+      visit(browser.render());
+      const preview = nodes.find(node => node.type === "pre").props.children;
+      assert.equal(Array.isArray(preview) ? preview.map(token => token.props.children).join("").replace(/\s+/g, " ") : preview,
+        scenario.expected?.query || "Select a query to preview");
+      assert.equal(nodes.filter(node => node.props?.["data-selected"]).length, scenario.expected ? 1 : 0);
+    }
+  });
+  await t.test("Delete on a history option deletes it and selects the next option", () => {
+    const {model, component, browser} = panel();
+    function findOption(node) {
+      if (Array.isArray(node)) { return node.map(findOption).find(Boolean); }
+      if (!node || typeof node !== "object") { return undefined; }
+      return node.props?.["data-query-library-row"] ? node : findOption(node.props?.children);
+    }
+    const option = findOption(browser.render());
+    option.props.onClick();
+    browser.navigate({key: "Delete", target: {dataset: {queryLibraryRow: "true"}}, preventDefault() {}, stopPropagation() {}});
+    assert.deepEqual(model.queryHistory.list, [b]);
+    assert.deepEqual(component.selected(), b);
+    assert.equal(component.state.open, true);
+    assert.equal(model.runs, 0);
+  });
+  await t.test("Delete after arrow selection from search uses the same deletion and preview state", () => {
+    const {model, component, browser} = panel();
+    const c = {query: "SELECT Id FROM Case", useToolingApi: false};
+    model.queryHistory.storage.setItem("history", JSON.stringify([a, b, c]));
+    model.queryHistory.refresh();
+    component.search.current = {};
+    const event = {target: component.search.current, preventDefault() {}, stopPropagation() {}};
+    browser.navigate({...event, key: "ArrowDown"});
+    assert.deepEqual(component.selected(), b);
+    browser.navigate({...event, key: "Delete"});
+    assert.deepEqual(model.queryHistory.list, [a, c]);
+    assert.deepEqual(component.selected(), c);
+    assert.equal(component.state.open, true);
+    assert.equal(model.runs, 0);
+  });
   await t.test("filtered deletion persists with no restoration action", () => {
     let {model, component} = panel();
     component.state.search = "account";
@@ -482,7 +602,7 @@ test("history panel interactions", async t => {
   });
 });
 
-test("history ranks match quality first and usage second without mutating storage order", async () => {
+test("history ranks match location first and usage second without mutating storage order", async () => {
   "use strict";
   const {filterHistory, englishSearch} = await import("../addon/query-history.js");
   const rows = [
@@ -491,8 +611,38 @@ test("history ranks match quality first and usage second without mutating storag
     {query: "SELECT Id FROM Case", runCount: 7},
     {query: "SELECT Id FROM BriefcaseAssignment", runCount: 100}
   ];
-  assert.deepEqual(filterHistory(rows, "case").map(e => e.runCount), [7, 2, 50, 100]);
+  assert.deepEqual(filterHistory(rows, "case").map(e => e.runCount), [100, 50, 7, 2]);
   assert.deepEqual(filterHistory(rows, "").map(e => e.runCount), [100, 50, 7, 2]);
   assert.equal(rows[0].runCount, 50);
   assert.equal(englishSearch("中文Account Id_1 = 'Hi'，😀"), "Account Id_1 = 'Hi'");
+});
+
+
+test("history prioritizes objects, selected fields, WHERE fields and other text", async () => {
+  "use strict";
+  global.React = require("../addon/react.js");
+  const {filterHistory, historySearchTexts} = await import("../addon/query-history.js");
+  const {QueryHistoryPanel} = await import("../addon/query-history-panel.js");
+  const rows = [
+    {query: "SELECT Id FROM Account WHERE Name = 'Needle'", runCount: 100},
+    {query: "SELECT Id FROM Account WHERE Needle__c = 'yes'", runCount: 80},
+    {query: "SELECT Needle__c FROM Account", runCount: 50},
+    {query: "SELECT Id FROM Needle", runCount: 1},
+    {query: "SELECT COUNT(Needle__c) total FROM Account", runCount: 60},
+    {query: "SELECT Id FROM Account ORDER BY Needle__c", runCount: 200},
+    {query: "SELECT Id FROM MyNeedle__c", runCount: 2}
+  ];
+  const expected = [rows[6], rows[3], rows[4], rows[2], rows[1], rows[5], rows[0]];
+  assert.deepEqual(filterHistory(rows, " NeEdLe "), expected);
+  assert.deepEqual(filterHistory(rows, "needle account"), [rows[5], rows[0], rows[1], rows[4], rows[2]]);
+  assert.deepEqual(filterHistory(rows, "absent"), []);
+  const panel = new QueryHistoryPanel({model: {queryHistory: {list: rows}}});
+  panel.state.search = "needle";
+  assert.deepEqual(panel.rows(), expected);
+  const query = "SELECT COUNT(Id) Needle, (SELECT Account.Name FROM Contacts WHERE DAY_ONLY(CreatedDate) > 2026-01-01) FROM Account WHERE (Name = 'Needle' OR Owner.Name = 'from where') AND Id IN (SELECT AccountId FROM Opportunity WHERE StageName = 'Needle') ORDER BY Needle__c /* Needle */";
+  const [objects, fields, whereFields] = historySearchTexts({query});
+  assert.equal(objects, "Contacts Account Opportunity");
+  assert.equal(fields, "Id Account.Name AccountId");
+  assert.equal(whereFields, "CreatedDate Name Owner.Name Id StageName");
+  assert.deepEqual(filterHistory([{query: "FIND {Needle}"}], "needle"), [{query: "FIND {Needle}"}]);
 });

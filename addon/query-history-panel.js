@@ -1,6 +1,6 @@
 /* global React */
 /* eslint-disable react/prop-types */
-import {historyKey, querySummary, previewTokens, executionCount} from "./query-history.js";
+import {historyKey, querySummary, previewTokens, executionCount, historySearchTexts} from "./query-history.js";
 import {QueryLibraryBrowser, queryLibraryRows, queryLibraryPosition} from "./query-library-browser.js";
 const h = React.createElement;
 
@@ -49,11 +49,13 @@ export class QueryHistoryPanel extends React.Component {
       search: this.state.search,
       selected: this.state.selected,
       itemKey: historyKey,
-      itemTexts: entry => [querySummary(entry.query).object, entry.query],
+      itemTexts: historySearchTexts,
+      prioritizeMatches: true,
       itemCount: executionCount,
       onSearchChange: (search, callback) => this.setState({search, replace: false}, callback),
       onSelect: (entry, callback) => this.setState({selected: entry ? historyKey(entry) : null, replace: false}, callback),
       onRun: () => this.load(false, true, true),
+      onDelete: entry => this.delete(entry),
       disabled: this.state.replace || this.state.more,
       inputRef: el => { this.search.current = el; },
       searchLabel: "Search query history",
@@ -88,8 +90,14 @@ export class QueryHistoryPanel extends React.Component {
   toggle() {
     if (this.state.open) { this.close(); return; }
     this.props.model.queryHistory.refresh();
-    let first = queryLibraryRows({...this.libraryProps(), search: ""})[0];
-    this.setState({open: true, search: "", selected: first ? historyKey(first) : null, error: ""}, () => this.search.current?.focus());
+    let selected = this.selected() || this.rows()[0];
+    this.setState({open: true, selected: selected ? historyKey(selected) : null, error: ""}, () => {
+      const input = this.search.current;
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    });
   }
   navigate(e) {
     if (this.state.replace && e.key === "Tab") {
@@ -126,11 +134,13 @@ export class QueryHistoryPanel extends React.Component {
     let rows = this.rows();
     let index = rows.findIndex(q => historyKey(q) === historyKey(entry));
     let next = rows[index + 1] || rows[index - 1];
+    let selected = this.state.selected === historyKey(entry) ? next ? historyKey(next) : null : this.state.selected;
     try {
       let removed = this.props.model.queryHistory.remove(entry);
       if (!removed) { this.refresh(); return; }
-      this.setState({error: "", replace: false}, () => {
-        this.reconcile(this.state.selected === historyKey(entry) ? next ? historyKey(next) : null : this.state.selected);
+      // Update selection before componentDidUpdate can fall back to the first row.
+      this.setState({error: "", replace: false, selected}, () => {
+        this.props.model.didUpdate();
         let row = this.root.current?.querySelector('[data-selected="true"]');
         (row || this.search.current)?.focus();
       });

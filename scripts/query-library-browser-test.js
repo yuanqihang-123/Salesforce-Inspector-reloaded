@@ -40,7 +40,7 @@ test("shared query library interactions", async t => {
     const {component, props, focused} = browser();
     component.changeSearch("中文User");
     assert.equal(props.search, "User");
-    assert.equal(props.selected, "b");
+    assert.equal(props.selected, "c");
     assert.equal(component.list.scrollTop, 0);
     component.list.scrollTop = 200;
     component.changeSearch("UserLogin");
@@ -89,6 +89,48 @@ test("shared query library interactions", async t => {
     component.changeSearch("missing");
     key("Enter");
     assert.equal(runs(), 0);
+  });
+  await t.test("mouse, arrows and option focus share selection for Delete", () => {
+    const {component, props, row, key} = browser();
+    const deleted = [];
+    props.onDelete = item => deleted.push(item.id);
+    const option = nodes(component.render()).filter(node => node.props["data-query-library-row"])[1];
+    option.props.onClick();
+    key("Delete", row);
+    key("ArrowDown");
+    key("Delete");
+    option.props.onFocus();
+    key("Delete", row);
+    assert.deepEqual(deleted, ["b", "a", "b"]);
+  });
+  await t.test("Delete respects composition, modifiers, repeats and disabled states", () => {
+    const {component, props, row} = browser();
+    const deleted = [];
+    props.onDelete = item => deleted.push(item.id);
+    let prevented = 0;
+    let stopped = 0;
+    const event = {key: "Delete", target: row, preventDefault() { prevented++; }, stopPropagation() { stopped++; }};
+    component.navigate(event);
+    assert.deepEqual(deleted, ["c"]);
+    assert.equal(props.selected, "c");
+    component.navigate({...event, repeat: true});
+    assert.equal(prevented, 2);
+    assert.equal(stopped, 2);
+    for (const flags of [{isComposing: true}, {nativeEvent: {isComposing: true}}, {ctrlKey: true}, {altKey: true}, {metaKey: true}, {shiftKey: true}, {key: "Backspace"}]) {
+      component.navigate({...event, ...flags});
+    }
+    props.disabled = true;
+    component.navigate(event);
+    props.disabled = false;
+    component.navigate({...event, target: {dataset: {}}});
+    props.selected = null;
+    component.navigate(event);
+    assert.deepEqual(deleted, ["c"]);
+    assert.equal(prevented, 2);
+    delete props.onDelete;
+    props.selected = "c";
+    component.navigate(event);
+    assert.equal(prevented, 2);
   });
   await t.test("editor mode disables search and replaces the option list", () => {
     const {component, props} = browser();

@@ -3,8 +3,8 @@
 import {englishSearch, rankQueryOptions} from "./query-history.js";
 const h = React.createElement;
 
-export function queryLibraryRows({items, search, itemTexts, itemCount}) {
-  return rankQueryOptions(items, search, itemTexts, itemCount);
+export function queryLibraryRows({items, search, itemTexts, itemCount, prioritizeMatches}) {
+  return rankQueryOptions(items, search, itemTexts, itemCount, prioritizeMatches);
 }
 
 // Open toward the right of the trigger and keep the panel inside the viewport.
@@ -32,6 +32,14 @@ export class QueryLibraryBrowser extends React.Component {
     if (this.props.disabled || e.isComposing || e.nativeEvent?.isComposing) { return; }
     const fromSearch = e.target === this.search;
     if (!fromSearch && !e.target.dataset?.queryLibraryRow) { return; }
+    if (e.key === "Delete" && this.props.onDelete && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const selected = this.rows().find(item => this.props.itemKey(item) === this.props.selected);
+      if (!selected) { return; }
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) { this.props.onDelete(selected); }
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
@@ -84,6 +92,7 @@ export class QueryLibraryBrowser extends React.Component {
                 "data-selected": active,
                 "aria-pressed": active,
                 title: itemTitle?.(item),
+                onFocus: () => { if (!active) { this.props.onSelect(item); } },
                 onClick: () => this.props.onSelect(item)},
               h("span", {className: "query-run-count", title: `${count} successful runs`, "aria-label": `${count} runs`}, count),
               h("span", {className: "query-option-text"}, renderItem(item))),

@@ -212,7 +212,51 @@ export class QueryHistory {
 }
 
 export function filterHistory(list, search) {
-  return rankQueryOptions(list, search, e => [querySummary(e.query).object, e.query], executionCount);
+  return rankQueryOptions(list, search, historySearchTexts, executionCount, true);
+}
+
+// Keep identifiers separate from literals, comments, aliases and other clauses.
+// Each nested SELECT has its own clause state; ordinary parentheses inherit it.
+export function historySearchTexts(entry) {
+  const objects = [];
+  const fields = [];
+  const whereFields = [];
+  const tokens = (queryTokens(entry.query) || []).filter(token => !/^\s+$|^(\/\*|--|\/\/)/.test(token));
+  let context = {clause: "", field: true};
+  const stack = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const word = token.toLowerCase();
+    if (token === "(") {
+      stack.push(context);
+      if (/^select$/i.test(tokens[i + 1] || "")) { context = {clause: "", field: true}; }
+      continue;
+    }
+    if (token === ")") { context = stack.pop() || context; continue; }
+    if (/^(select|from|where|having|limit|offset|order|group|with|using|for|update|all)$/.test(word)) {
+      context.clause = word;
+      context.field = true;
+      continue;
+    }
+    if (context.clause === "from") {
+      if (context.field && /^[a-z_]\w*$/i.test(token)) { objects.push(token); context.field = false; }
+      continue;
+    }
+    if (context.clause === "where") {
+      if (/^(and|or|not)$/.test(word)) { context.field = true; continue; }
+      if (/^(=|!|<|>|in|like|includes|excludes)$/.test(word)) { context.field = false; continue; }
+    }
+    if (!/^[a-z_][\w.]*$/i.test(token) || /^(true|false|null|as|distinct|asc|desc|end|else|when|then|typeof)$/.test(word)
+      || tokens[i + 1] === "(" || tokens[i - 1] === ":") { continue; }
+    if (context.clause === "select") {
+      // An identifier following a field/expression is its display alias.
+      if ((/^[a-z_][\w.]*$/i.test(tokens[i - 1] || "") && !/^(select|distinct)$/i.test(tokens[i - 1])) || tokens[i - 1] === ")") { continue; }
+      fields.push(token);
+    } else if (context.clause === "where" && context.field) {
+      whereFields.push(token);
+    }
+  }
+  return [objects.join(" "), fields.join(" "), whereFields.join(" "), entry.query];
 }
 
 // Tokenize quoted strings and comments before inspecting or formatting clauses.
@@ -294,15 +338,14 @@ export function englishSearch(value) {
   return value.replace(/[^\x20-\x7e]/g, "");
 }
 
-// Exact matches precede prefixes, whole words, then substrings. Usage breaks ties.
-export function rankQueryOptions(list, search, texts, count) {
+// Filter every term anywhere; optional ordered text categories precede usage.
+export function rankQueryOptions(list, search, texts, count, prioritizeMatches = false) {
   const phrase = search.trim().toLowerCase();
   const terms = phrase.split(/\s+/).filter(Boolean);
-  const rank = text => text === phrase ? 0 : text.startsWith(phrase) ? 1
-    : terms.every(term => text.split(/[^a-z0-9_]+/).includes(term)) ? 2 : 3;
   return list.map(entry => {
     const fields = texts(entry).map(text => String(text || "").toLowerCase());
-    return {entry, fields, rank: phrase ? Math.min(...fields.map(rank)) : 0};
+    const rank = prioritizeMatches && terms.length ? fields.findIndex(text => terms.some(term => text.includes(term))) : 0;
+    return {entry, fields, rank};
   }).filter(item => terms.every(term => item.fields.some(text => text.includes(term))))
     .sort((a, b) => a.rank - b.rank || count(b.entry) - count(a.entry))
     .map(item => item.entry);
