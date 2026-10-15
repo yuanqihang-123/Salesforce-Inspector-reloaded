@@ -1,7 +1,7 @@
 /* global React */
 /* eslint-disable react/prop-types */
 import {querySummary, previewTokens} from "./query-history.js";
-import {buildQuery, matchingObjects, readTemplates, renderCustom, saveTemplate, deleteTemplate, parametersIn, parameterTypes, quoteText, validateTemplate, TEMPLATE_KEY, TEMPLATE_USAGE_KEY} from "./query-templates.js";
+import {buildQuery, matchingObjects, parseRecordIds, readTemplates, renderCustom, saveTemplate, deleteTemplate, parametersIn, parameterTypes, quoteText, validateTemplate, TEMPLATE_KEY, TEMPLATE_USAGE_KEY} from "./query-templates.js";
 import {QueryLibraryBrowser, queryLibraryRows, queryLibraryPosition} from "./query-library-browser.js";
 const h = React.createElement;
 
@@ -17,6 +17,9 @@ export class QueryTemplatePanel extends React.Component {
     document.addEventListener("mousedown", this.outside);
     window.addEventListener("storage", this.storage);
     window.addEventListener("resize", this.resize);
+  }
+  componentDidUpdate(prevProps, prevState) {
+    if (this.pendingIdObject || prevState.tooling !== this.state.tooling || prevState.selected !== this.state.selected) { this.fillIdObject(); }
   }
   componentWillUnmount() {
     document.removeEventListener("mousedown", this.outside);
@@ -84,8 +87,24 @@ export class QueryTemplatePanel extends React.Component {
     } catch (error) { return {query: "", message: error.message}; }
   }
   change(name, value) {
+    if (name === "object") { this.pendingIdObject = false; }
     let objectChanged = name === "object" && (this.state.values.object || "").trim().toLowerCase() !== value.trim().toLowerCase();
-    this.setState({values: {...this.state.values, [name]: value, ...(objectChanged ? {field: ""} : {})}, replace: false});
+    this.setState({values: {...this.state.values, [name]: value, ...(objectChanged ? {field: ""} : {})}, replace: false}, name === "ids" ? () => this.fillIdObject() : undefined);
+  }
+  fillIdObject() {
+    this.pendingIdObject = false;
+    if (!this.state.open || this.state.editing || this.selected()?.kind !== "builtin" || this.state.selected !== "ids") { return; }
+    let firstId = parseRecordIds(this.state.values.ids)[0];
+    if (!/^(?:[A-Za-z0-9]{15}|[A-Za-z0-9]{18})$/.test(firstId || "")) { return; }
+    let {globalStatus, globalDescribe} = this.props.model.describeInfo.describeGlobal(this.state.tooling);
+    if (globalStatus !== "ready") {
+      this.pendingIdObject = ["pending", "loading"].includes(globalStatus);
+      return;
+    }
+    let objects = globalDescribe.sobjects.filter(o => o.queryable && o.keyPrefix === firstId.slice(0, 3));
+    if (objects.length === 1 && this.state.values.object !== objects[0].name) {
+      this.setState({values: {...this.state.values, object: objects[0].name, field: ""}, objectPicker: null, replace: false});
+    }
   }
   load(newTab, replace = false, run = false) {
     if (this.props.model.isWorking) { return; }

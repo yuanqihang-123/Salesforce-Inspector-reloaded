@@ -168,6 +168,72 @@ test("panel uses preview-only selection and guarded tab loading", async t => {
     assert.equal(loads[0][1], true);
     assert.equal(p.state.open, false);
   });
+  await t.test("typing or pasting IDs fills the object from the first ID in every supported format", () => {
+    const {panel: p, model, loads} = panel();
+    p.state.selected = "ids";
+    const objects = [{name: "Account", keyPrefix: "001", queryable: true}, {name: "User", keyPrefix: "005", queryable: true}];
+    model.describeInfo.describeGlobal = () => ({globalStatus: "ready", globalDescribe: {sobjects: objects}});
+    model.describeInfo.describeSobject = (tooling, name) => ({sobjectStatus: "ready", sobjectDescribe: {...describe, name}});
+    for (const ids of ["0058500000789dBAAQ", '"0058500000789dBAAQ",\n "001000000000001AAA"', '["0058500000789dBAAQ",\n "001000000000001AAA"]']) {
+      p.change("object", "Account");
+      p.change("ids", ids);
+      assert.equal(p.state.values.object, "User");
+      assert.match(p.preview(p.selected(), p.currentMetadata(p.selected())).query, /FROM User/);
+    }
+    p.change("ids", "001000000000001");
+    assert.equal(p.state.values.object, "Account");
+    p.change("object", "User");
+    p.componentDidUpdate({}, {...p.state});
+    assert.equal(p.state.values.object, "User");
+    assert.equal(loads.length, 0);
+    assert.equal(model.queryInput.value, "SELECT Id FROM Account");
+  });
+  await t.test("ID object detection waits for metadata and uses the current input and API", () => {
+    const {panel: p, model} = panel();
+    p.state.selected = "ids";
+    let ready = false;
+    const calls = [];
+    model.describeInfo.describeGlobal = tooling => {
+      calls.push(tooling);
+      return {globalStatus: ready ? "ready" : "loading", globalDescribe: ready ? {sobjects: [{name: tooling ? "ToolingUser" : "User", keyPrefix: "005", queryable: true}]} : null};
+    };
+    p.change("ids", "0058500000789dBAAQ");
+    assert.equal(p.state.values.object, "Account");
+    assert.equal(p.pendingIdObject, true);
+    ready = true;
+    p.componentDidUpdate({}, {...p.state});
+    assert.equal(p.state.values.object, "User");
+    assert.equal(p.pendingIdObject, false);
+    const previous = {...p.state};
+    p.state.tooling = true;
+    p.componentDidUpdate({}, previous);
+    assert.equal(p.state.values.object, "ToolingUser");
+    assert.equal(calls.at(-1), true);
+    ready = false;
+    p.change("ids", "00585000007940oAAA");
+    p.change("ids", "");
+    ready = true;
+    p.componentDidUpdate({}, {...p.state});
+    assert.equal(p.state.values.object, "ToolingUser");
+    assert.equal(p.pendingIdObject, false);
+  });
+  await t.test("invalid, unknown, ambiguous and unqueryable prefixes leave the object unchanged", () => {
+    const {panel: p, model} = panel();
+    p.state.selected = "ids";
+    model.describeInfo.describeGlobal = () => ({globalStatus: "ready",
+      globalDescribe: {sobjects: [
+        {name: "Hidden", keyPrefix: "005", queryable: false},
+        {name: "SharedA", keyPrefix: "001", queryable: true},
+        {name: "SharedB", keyPrefix: "001", queryable: true}
+      ]}});
+    for (const ids of ["", "005", "invalid,0058500000789dBAAQ", "9998500000789dBAAQ", "0058500000789dBAAQ", "001000000000001AAA"]) {
+      p.change("ids", ids);
+      assert.equal(p.state.values.object, "Account");
+    }
+    p.state.selected = "created";
+    p.change("ids", "0058500000789dBAAQ");
+    assert.equal(p.state.values.object, "Account");
+  });
   await t.test("dirty edits confirm; running exports and invalid parameters block loading", () => {
     const {panel: p, model, loads} = panel();
     model.hasQueryEdits = () => true;

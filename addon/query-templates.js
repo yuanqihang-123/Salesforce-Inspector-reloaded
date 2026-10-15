@@ -17,6 +17,11 @@ export const starterTemplates = [
 export function quoteText(value) {
   return "'" + String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r/g, "\\r").replace(/\n/g, "\\n").replace(/\t/g, "\\t") + "'";
 }
+export function parseRecordIds(value) {
+  let input = String(value || "").trim();
+  if (input.startsWith("[") && input.endsWith("]")) { input = input.slice(1, -1); }
+  return [...new Set(input.split(/[\s,;]+/).filter(Boolean).map(id => id.replace(/^(["'])(.*)\1$/, "$2")))];
+}
 export function matchingObjects(objects, input) {
   let term = String(input || "").trim().toLowerCase();
   let rank = object => {
@@ -96,9 +101,7 @@ export function buildQuery(id, values, describe) {
   if (nameField && nameField.name !== "Id") { columns.push(nameField.name); }
   let suffix;
   if (id === "ids") {
-    let input = String(values.ids || "").trim();
-    if (input.startsWith("[") && input.endsWith("]")) { input = input.slice(1, -1); }
-    let ids = [...new Set(input.split(/[\s,;]+/).filter(Boolean).map(value => value.replace(/^(["'])(.*)\1$/, "$2")))];
+    let ids = parseRecordIds(values.ids);
     if (!ids.length || ids.some(value => !/^(?:[A-Za-z0-9]{15}|[A-Za-z0-9]{18})$/.test(value))) { throw new Error("Enter Salesforce IDs of 15 or 18 characters, separated by commas or new lines. Quoted IDs and arrays are also supported."); }
     suffix = ids.length === 1 ? `WHERE Id = ${quoteText(ids[0])}` : `WHERE Id IN (${ids.map(quoteText).join(", ")})`;
   } else if (id === "created" || id === "modified") {
